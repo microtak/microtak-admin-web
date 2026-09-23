@@ -34,12 +34,13 @@ All via environment variables:
 ### Bootstrapping the admin certificate
 
 This tool doesn't enroll itself. You need an admin device already enrolled
-against microtak-server first — see that project's
-`docs/ARCHITECTURE.md` "Enrollment lockdown / admin API" section for the
-real two-phase bootstrap flow (enroll the admin device while enrollment is
-still open, *then* turn `enrollment_requires_token` on). Point
-`MICROTAK_ADMIN_WEB_CERT`/`_KEY`/`_CA` at that admin device's issued
-credentials.
+against microtak-server first, while it's still open — by default
+(`enrollment_mode = "auto"`), a fresh server accepts enrollment with no
+token until its configured admin device exists, then locks down for
+everyone else from that moment on, live, no restart (see
+microtak-server's own `docs/ARCHITECTURE.md` "Enrollment lockdown / admin
+API" section). Point `MICROTAK_ADMIN_WEB_CERT`/`_KEY`/`_CA` at that admin
+device's issued credentials.
 
 ## Running
 
