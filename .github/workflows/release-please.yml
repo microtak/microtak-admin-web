@@ -1,0 +1,31 @@
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+
+  # See microtak-server's own release-please.yml for why this is chained
+  # directly rather than triggered by `release: published`: a release
+  # created by release-please's own GITHUB_TOKEN doesn't fire that event.
+  publish-binaries:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    uses: ./.github/workflows/publish-binaries.yml
+    with:
+      tag_name: ${{ needs.release-please.outputs.tag_name }}
+    permissions:
+      contents: write

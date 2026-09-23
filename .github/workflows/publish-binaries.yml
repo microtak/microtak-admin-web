@@ -1,0 +1,57 @@
+name: Publish release binaries
+
+# See release-please.yml: chained via workflow_call rather than relying on
+# `release: published`, which doesn't fire for a release release-please's
+# own GITHUB_TOKEN created. Kept as a fallback for a manually-created
+# release too.
+on:
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # x86_64-linux only for now -- the natural next step is adding
+    # aarch64-unknown-linux-gnu (Raspberry Pi et al.) via `cross`, and
+    # macOS targets on `macos-latest` runners, once this baseline is
+    # proven out. See also this repo's flake.nix, which already covers
+    # aarch64-linux/darwin natively for Nix users.
+    runs-on: ubuntu-latest
+    steps:
+      # Even a plain release build needs the sibling ../microtak-server
+      # checkout to resolve the [dev-dependencies] path entry -- see
+      # ci.yml for the same requirement and why.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name || github.event.release.tag_name }}
+          path: microtak-admin-web
+
+      - uses: actions/checkout@v4
+        with:
+          repository: microtak/microtak-server
+          path: microtak-server
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        working-directory: microtak-admin-web
+        run: cargo build --release --locked
+
+      - name: Package
+        working-directory: microtak-admin-web
+        run: |
+          cd target/release
+          tar czf microtak-admin-web-x86_64-unknown-linux-gnu.tar.gz microtak-admin-web
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name || github.event.release.tag_name }}
+          files: microtak-admin-web/target/release/microtak-admin-web-x86_64-unknown-linux-gnu.tar.gz
