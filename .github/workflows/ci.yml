@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build, test, and lint
+    runs-on: ubuntu-latest
+    steps:
+      # tests/e2e.rs has a [dev-dependencies] path dependency on a sibling
+      # ../microtak-server checkout (see README.md "Development") -- even a
+      # plain `cargo build` needs it present to resolve the manifest, not
+      # just the test binary. Check both out under one $GITHUB_WORKSPACE so
+      # the relative path lines up the same way it does in local dev.
+      - uses: actions/checkout@v4
+        with:
+          path: microtak-admin-web
+
+      - uses: actions/checkout@v4
+        with:
+          repository: microtak/microtak-server
+          path: microtak-server
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: microtak-admin-web
+
+      - name: Build
+        working-directory: microtak-admin-web
+        run: cargo build --tests --locked
+
+      - name: Test
+        working-directory: microtak-admin-web
+        run: cargo test --locked
+
+      - name: Clippy
+        working-directory: microtak-admin-web
+        run: cargo clippy --all-targets --locked -- -D warnings
