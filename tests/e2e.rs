@@ -38,16 +38,20 @@ async fn enroll(base_url: &str, common_name: &str) -> (String, rcgen::KeyPair) {
         .unwrap();
     assert_eq!(response.status(), 200);
     let body: serde_json::Value = response.json().await.unwrap();
-    let cert_pem = body["signedCert"].as_str().unwrap().to_string();
+    // Real Marti wire format: bare base64, no PEM armor -- a real client
+    // (`node-tak`'s `credentials.ts`) re-wraps this itself, so tests do the
+    // same rather than assuming full-PEM.
+    let bare_cert = body["signedCert"].as_str().unwrap();
+    let cert_pem = format!("-----BEGIN CERTIFICATE-----\n{bare_cert}\n-----END CERTIFICATE-----\n");
     (cert_pem, key)
 }
 
 /// Sets up a real running `App` with an admin device already enrolled
-/// (mirroring the documented two-phase bootstrap: enroll while open, then
-/// -- here, simply configuring `admin_common_name` from the start works
-/// fine since we don't also need `enrollment_requires_token` for this
-/// test), and a `microtak-admin-web` router pointed at it with that
-/// admin's real cert.
+/// (configuring `admin_common_name` from the start and enrolling
+/// immediately works fine here, since `EnrollmentMode::Auto`'s default
+/// stays open until that admin device actually exists -- see
+/// microtak-server's own `EnrollmentState::is_locked_down`), and a
+/// `microtak-admin-web` router pointed at it with that admin's real cert.
 async fn setup() -> (axum::Router, Arc<microtak_server::missions::MissionStore>, std::path::PathBuf) {
     let creds_dir = unique_temp_dir("creds");
     std::fs::create_dir_all(&creds_dir).unwrap();
