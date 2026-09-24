@@ -1,6 +1,6 @@
 [package]
 name = "microtak-admin-web"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Web-based admin UI for a MicroTAK server: enrollment invite tokens (with QR codes) and mission role management"
 license = "AGPL-3.0-or-later"
