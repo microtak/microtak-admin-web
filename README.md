@@ -111,6 +111,10 @@ dependencies]`-only path dependency on the sibling `../microtak-server`
 checkout — this tool's actual runtime binary has no dependency on that
 crate at all) and drives this tool's real router against it end to end.
 
+`scripts/build.sh` runs the same three steps and checks the sibling
+checkout is present first, with a clear error if it isn't; see
+`scripts/build.sh --help`.
+
 ## License
 
 AGPL-3.0-or-later — see [LICENSE](LICENSE). Same reasoning as
