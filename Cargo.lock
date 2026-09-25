@@ -837,7 +837,7 @@ dependencies = [
 
 [[package]]
 name = "microtak-server"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "argon2",
  "axum",
