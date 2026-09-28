@@ -26,11 +26,11 @@ fn unique_temp_dir(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("microtak-admin-web-e2e-{label}-{}-{n}", std::process::id()))
 }
 
-async fn enroll(base_url: &str, common_name: &str) -> (String, rcgen::KeyPair) {
+async fn enroll(base_url: &str, common_name: &str, token: &str) -> (String, rcgen::KeyPair) {
     let (csr_pem, key) = pki::build_csr(common_name).unwrap();
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("{base_url}/Marti/api/tls/signClient/v2"))
+        .post(format!("{base_url}/Marti/api/tls/signClient/v2?token={token}"))
         .header("Content-Type", "application/octet-stream")
         .body(csr_pem)
         .send()
@@ -46,12 +46,12 @@ async fn enroll(base_url: &str, common_name: &str) -> (String, rcgen::KeyPair) {
     (cert_pem, key)
 }
 
-/// Sets up a real running `App` with an admin device already enrolled
-/// (configuring `admin_common_name` from the start and enrolling
-/// immediately works fine here, since `EnrollmentMode::Auto`'s default
-/// stays open until that admin device actually exists -- see
-/// microtak-server's own `EnrollmentState::is_locked_down`), and a
-/// `microtak-admin-web` router pointed at it with that admin's real cert.
+/// Sets up a real running `App` with an admin device already enrolled --
+/// the way a real operator does it: with the one-time bootstrap token the
+/// server writes to its data dir on first start (microtak-server's
+/// `src/bootstrap.rs`; the admin CN can't be enrolled any other way) --
+/// and a `microtak-admin-web` router pointed at it with that admin's real
+/// cert.
 async fn setup() -> (axum::Router, Arc<microtak_server::missions::MissionStore>, std::path::PathBuf) {
     let creds_dir = unique_temp_dir("creds");
     std::fs::create_dir_all(&creds_dir).unwrap();
@@ -70,10 +70,15 @@ async fn setup() -> (axum::Router, Arc<microtak_server::missions::MissionStore>,
     let marti_api_addr = app.marti_api_addr().unwrap();
     let ca_cert_pem = app.ca_cert_pem.clone();
     let missions = app.missions.clone();
+    let bootstrap_path = app
+        .bootstrap_token_path()
+        .expect("a fresh server has a bootstrap token outstanding");
+    let bootstrap_token = std::fs::read_to_string(bootstrap_path).unwrap();
     tokio::spawn(app.run());
 
     let enrollment_base_url = format!("http://{enrollment_addr}");
-    let (admin_cert, admin_key) = enroll(&enrollment_base_url, "web-admin").await;
+    let (admin_cert, admin_key) =
+        enroll(&enrollment_base_url, "web-admin", bootstrap_token.trim()).await;
 
     let cert_path = creds_dir.join("admin.pem");
     let key_path = creds_dir.join("admin.key");
