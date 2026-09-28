@@ -29,6 +29,8 @@ async fn main() {
     let state = pages::AppState {
         client: Arc::new(client),
         enrollment_url: config.enrollment_url,
+        streaming_port: config.streaming_port,
+        api_port: config.api_port,
     };
 
     let password = Arc::new(config.web_password);

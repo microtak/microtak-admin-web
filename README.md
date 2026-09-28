@@ -29,7 +29,9 @@ All via environment variables:
 | `MICROTAK_ADMIN_WEB_CA` | yes | Path to microtak-server's CA certificate PEM |
 | `MICROTAK_ADMIN_WEB_PASSWORD` | yes | Shared secret required to use this web UI at all (HTTP Basic Auth) — see "Auth" below |
 | `MICROTAK_ADMIN_WEB_BIND` | no (default `127.0.0.1:8090`) | Where this tool itself listens |
-| `MICROTAK_ADMIN_WEB_ENROLLMENT_URL` | no | microtak-server's *enrollment* endpoint base URL (different port, plain HTTP, e.g. `http://microtak.example.com:8446`) — included in minted tokens' QR codes if set |
+| `MICROTAK_ADMIN_WEB_ENROLLMENT_URL` | no | Where devices reach microtak-server's enrollment endpoint (HTTPS only), e.g. `https://192.168.1.10:8446`, or `https://tak.example.com` behind a reverse proxy on 443 — needed for enrollment QR codes |
+| `MICROTAK_ADMIN_WEB_STREAMING_PORT` | no | Streaming (mTLS CoT) port devices connect to, default `8089` — added to the QR code only if different |
+| `MICROTAK_ADMIN_WEB_API_PORT` | no | Marti API port devices connect to, default `8443` — added to the QR code only if different |
 
 ### Bootstrapping the admin certificate
 
@@ -61,10 +63,10 @@ username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
 ## What it does
 
 - **`/tokens`** — list existing enrollment invite tokens (status:
-  unused/used/expired/revoked, note, expiry), mint a new one (optional
-  expiry, optional note), and see the newly-minted token rendered as a
-  real inline SVG QR code — generated server-side, not via a client-side
-  JS library.
+  unused/used/expired/revoked, device it's bound to, note, expiry), mint a
+  new one (device name, optional expiry and note), and get the standard TAK
+  enrollment QR code for it — an inline SVG generated server-side, plus a
+  tap-to-open `tak://` link for when the page is open on the device itself.
 - **`/missions`** and **`/missions/:name`** — list missions, and per
   mission, see and manage its `Owner`/`Subscriber` role assignments.
   Assigning/revoking a role that would leave a mission with zero owners
@@ -73,17 +75,22 @@ username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
 
 ## QR code payload
 
-**This is MicroTAK's own scheme, not a claimed-compatible ATAK/Marti
-standard** — no authoritative source for a real one was found. The QR
-encodes a JSON object:
+The standard ATAK enrollment link — the same one `microtak-admin-cli token
+mint --qr` prints:
 
-```json
-{"microtakEnroll": {"token": "<the token>", "enrollmentUrl": "<optional, if MICROTAK_ADMIN_WEB_ENROLLMENT_URL is set>"}}
+```
+tak://com.atakmap.app/enroll?host=<host>&username=<device name>&token=<token>
 ```
 
-Deliberately plain JSON (not a bespoke binary encoding) so it's
-inspectable by hand and trivial for a future `microtak-admin-cli` or
-`microtak-node` consumer to parse.
+Scanning it in ATAK or OmniTAK enrolls the device over HTTPS (presenting
+the token as the password for that device name) and connects it — nothing
+to type. `host` and the enrollment port come from
+`MICROTAK_ADMIN_WEB_ENROLLMENT_URL`; OmniTAK's optional `enrollmentport=`,
+`port=` and `apiport=` are added only when they differ from 8446/8089/8443.
+A QR code is only shown when a device name was entered: the token is bound
+to that identity server-side and can't enroll any other. Anyone who sees
+the code before the device uses it can enroll as that device, so show it
+only to its user.
 
 ## Auth — a deliberate v1 simplification
 
