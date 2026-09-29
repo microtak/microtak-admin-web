@@ -38,6 +38,17 @@ jobs:
         with:
           workspaces: microtak-admin-web
 
+      # CI tests against microtak-server's *current* main on purpose (to
+      # catch API breaks early), while Cargo.lock records the server version
+      # of the last lock refresh. A server release bumps that version -- and
+      # possibly its dependencies -- which alone would make `--locked` fail
+      # here. Re-resolve just the path dependency first; everything else
+      # stays locked. Release builds pin the exact locked server version
+      # instead (publish-binaries.yml).
+      - name: Sync the microtak-server path dependency
+        working-directory: microtak-admin-web
+        run: cargo update -p microtak-server
+
       - name: Build
         working-directory: microtak-admin-web
         run: cargo build --tests --locked

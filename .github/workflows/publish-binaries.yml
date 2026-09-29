@@ -1,15 +1,26 @@
 name: Publish release binaries
 
-# See release-please.yml: chained via workflow_call rather than relying on
-# `release: published`, which doesn't fire for a release release-please's
-# own GITHUB_TOKEN created. Kept as a fallback for a manually-created
-# release too.
+# Releases here are immutable (org setting): assets can only be attached
+# *before* a release is published. So release-please creates the release as
+# a **draft** (release-please-config.json: "draft" + "force-tag-creation",
+# the latter so the tag exists immediately and the next release PR still
+# finds this release), this workflow builds and uploads the binaries to the
+# draft, and only then publishes it. A failed build leaves an unpublished
+# draft -- never a published release without binaries.
+#
+# Chained from release-please.yml via workflow_call (a release created with
+# the workflow's own GITHUB_TOKEN doesn't fire release events). Can also be
+# run by hand for a draft release that's still waiting for its binaries.
 on:
-  release:
-    types: [published]
   workflow_call:
     inputs:
       tag_name:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Tag of the draft release to build, upload to, and publish
         required: true
         type: string
 
@@ -18,24 +29,33 @@ permissions:
 
 jobs:
   build:
-    # x86_64-linux only for now -- the natural next step is adding
-    # aarch64-unknown-linux-gnu (Raspberry Pi et al.) via `cross`, and
-    # macOS targets on `macos-latest` runners, once this baseline is
-    # proven out. See also this repo's flake.nix, which already covers
-    # aarch64-linux/darwin natively for Nix users.
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
-      # Even a plain release build needs the sibling ../microtak-server
-      # checkout to resolve the [dev-dependencies] path entry -- see
-      # ci.yml for the same requirement and why.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag_name || github.event.release.tag_name }}
+          ref: ${{ inputs.tag_name }}
           path: microtak-admin-web
+
+      # The e2e tests' path dependency (../microtak-server) must exist even
+      # for a plain build. Check out exactly the server version Cargo.lock
+      # records (its release tag), so `--locked` holds and the release build
+      # is reproducible -- not whatever microtak-server's main is today.
+      - name: Find the locked microtak-server version
+        id: server
+        working-directory: microtak-admin-web
+        run: |
+          version=$(awk '/^name = "microtak-server"$/ { getline; gsub(/"/, "", $3); print $3; exit }' Cargo.lock)
+          test -n "$version" || { echo "microtak-server not found in Cargo.lock" >&2; exit 1; }
+          echo "ref=v$version" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
           repository: microtak/microtak-server
+          ref: ${{ steps.server.outputs.ref }}
           path: microtak-server
 
       - uses: dtolnay/rust-toolchain@stable
@@ -50,8 +70,10 @@ jobs:
           cd target/release
           tar czf microtak-admin-web-x86_64-unknown-linux-gnu.tar.gz microtak-admin-web
 
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag_name || github.event.release.tag_name }}
-          files: microtak-admin-web/target/release/microtak-admin-web-x86_64-unknown-linux-gnu.tar.gz
+      # `gh` finds draft releases by tag (the REST "get release by tag"
+      # endpoint, which some upload actions rely on, doesn't return drafts).
+      - name: Upload to the draft release
+        run: gh release upload "$TAG" microtak-admin-web/target/release/microtak-admin-web-x86_64-unknown-linux-gnu.tar.gz --clobber
+
+      - name: Publish the release
+        run: gh release edit "$TAG" --draft=false --latest
