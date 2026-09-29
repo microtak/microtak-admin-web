@@ -35,6 +35,9 @@ pub struct EnrollmentToken {
     /// The device name the token is bound to, if any.
     #[serde(default)]
     pub common_name: Option<String>,
+    /// Groups the enrolling device is added to.
+    #[serde(default)]
+    pub groups: Vec<GroupGrant>,
     pub used: bool,
     pub used_by_common_name: Option<String>,
     #[allow(dead_code)]
@@ -51,6 +54,54 @@ pub struct Mission {
     pub description: Option<String>,
     pub creator_uid: String,
     pub roles: std::collections::BTreeMap<String, String>,
+    /// The groups the mission is visible in (older servers omit this).
+    #[serde(default)]
+    pub groups: Vec<String>,
+    #[serde(rename = "defaultRole", default)]
+    pub default_role: Option<String>,
+}
+
+/// A group membership handed out at enrollment.
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+pub struct GroupGrant {
+    pub name: String,
+    /// `IN`, `OUT` or `BOTH`.
+    pub membership: String,
+}
+
+/// Short text form of grants: `Red, Blue(out)`.
+pub fn describe_grants(grants: &[GroupGrant]) -> String {
+    if grants.is_empty() {
+        return "—".to_string();
+    }
+    grants
+        .iter()
+        .map(|g| match g.membership.as_str() {
+            "BOTH" => g.name.clone(),
+            other => format!("{}({})", g.name, other.to_lowercase()),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Groups to put an enrolling device into -- the official user-file lists.
+#[derive(Serialize, Default, Debug, PartialEq)]
+pub struct GroupLists {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<String>,
+    #[serde(rename = "groupsIn", skip_serializing_if = "Vec::is_empty")]
+    pub groups_in: Vec<String>,
+    #[serde(rename = "groupsOut", skip_serializing_if = "Vec::is_empty")]
+    pub groups_out: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GroupInfo {
+    pub name: String,
+    pub description: Option<String>,
+    pub bitpos: u32,
+    /// identity -> `IN` / `OUT` / `BOTH`
+    pub members: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -61,6 +112,8 @@ struct MintTokenRequest {
     note: Option<String>,
     #[serde(rename = "commonName", skip_serializing_if = "Option::is_none")]
     common_name: Option<String>,
+    #[serde(flatten)]
+    groups: GroupLists,
 }
 
 #[derive(Deserialize)]
@@ -158,6 +211,7 @@ impl MicrotakClient {
         expires_in_secs: Option<i64>,
         note: Option<String>,
         common_name: Option<String>,
+        groups: GroupLists,
     ) -> Result<String, ClientError> {
         let response = self
             .http
@@ -166,6 +220,7 @@ impl MicrotakClient {
                 expires_in_secs,
                 note,
                 common_name,
+                groups,
             })
             .send()
             .await?;
@@ -223,6 +278,69 @@ impl MicrotakClient {
                 urlencoding_light(mission)
             ))
             .json(&AssignRoleRequest { uid, role })
+            .send()
+            .await?;
+        check_status(response).await?;
+        Ok(())
+    }
+
+    pub async fn list_groups(&self) -> Result<Vec<GroupInfo>, ClientError> {
+        let response = self
+            .http
+            .get(format!("{}/Marti/api/admin/groups", self.base_url))
+            .send()
+            .await?;
+        let response = check_status(response).await?;
+        Ok(response.json().await?)
+    }
+
+    pub async fn create_group(&self, name: &str, description: Option<String>) -> Result<(), ClientError> {
+        let response = self
+            .http
+            .post(format!("{}/Marti/api/admin/groups", self.base_url))
+            .json(&serde_json::json!({ "name": name, "description": description }))
+            .send()
+            .await?;
+        check_status(response).await?;
+        Ok(())
+    }
+
+    pub async fn delete_group(&self, name: &str) -> Result<(), ClientError> {
+        let response = self
+            .http
+            .delete(format!("{}/Marti/api/admin/groups/{}", self.base_url, urlencoding_light(name)))
+            .send()
+            .await?;
+        check_status(response).await?;
+        Ok(())
+    }
+
+    /// `direction`: `IN`, `OUT` or `BOTH`.
+    pub async fn set_group_member(&self, group: &str, identity: &str, direction: &str) -> Result<(), ClientError> {
+        let response = self
+            .http
+            .put(format!(
+                "{}/Marti/api/admin/groups/{}/members/{}",
+                self.base_url,
+                urlencoding_light(group),
+                urlencoding_light(identity)
+            ))
+            .json(&serde_json::json!({ "direction": direction }))
+            .send()
+            .await?;
+        check_status(response).await?;
+        Ok(())
+    }
+
+    pub async fn remove_group_member(&self, group: &str, identity: &str) -> Result<(), ClientError> {
+        let response = self
+            .http
+            .delete(format!(
+                "{}/Marti/api/admin/groups/{}/members/{}",
+                self.base_url,
+                urlencoding_light(group),
+                urlencoding_light(identity)
+            ))
             .send()
             .await?;
         check_status(response).await?;
