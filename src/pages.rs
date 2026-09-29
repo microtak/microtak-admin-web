@@ -12,12 +12,17 @@ use maud::{html, Markup, DOCTYPE};
 use serde::Deserialize;
 
 use crate::client::{ClientError, MicrotakClient};
-use crate::qr::EnrollmentQr;
+use crate::qr::EnrollmentLink;
 
 #[derive(Clone)]
 pub struct AppState {
     pub client: Arc<MicrotakClient>,
+    /// Where devices reach the server's (HTTPS-only) enrollment endpoint --
+    /// the QR code's `host`/`enrollmentport`. No QR codes without it.
     pub enrollment_url: Option<String>,
+    /// The streaming (mTLS CoT) and Marti API ports devices connect to.
+    pub streaming_port: u16,
+    pub api_port: u16,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -73,7 +78,11 @@ fn error_banner(message: &str) -> Markup {
 }
 
 fn error_response(error: &ClientError) -> Response {
-    Html(layout("Error", error_banner(&error.to_string())).into_string()).into_response()
+    error_page(&error.to_string())
+}
+
+fn error_page(message: &str) -> Response {
+    Html(layout("Error", error_banner(message)).into_string()).into_response()
 }
 
 // ---------------------------------------------------------------------
@@ -93,6 +102,9 @@ fn render_tokens_list(tokens: &[crate::client::EnrollmentToken]) -> Markup {
         fieldset {
             legend { "Mint a new token" }
             form method="post" action="/tokens" {
+                label { "Device name: " input type="text" name="common_name" placeholder="e.g. phone-1"; }
+                small { " — binds the token to this identity; needed for the QR code" }
+                br;
                 label { "Expires in (seconds, optional): " input type="number" name="expires_in_secs"; }
                 br;
                 label { "Note (optional): " input type="text" name="note"; }
@@ -101,10 +113,11 @@ fn render_tokens_list(tokens: &[crate::client::EnrollmentToken]) -> Markup {
             }
         }
         table {
-            tr { th{"Token"} th{"Note"} th{"Created"} th{"Expires"} th{"Status"} th{} }
+            tr { th{"Token"} th{"For"} th{"Note"} th{"Created"} th{"Expires"} th{"Status"} th{} }
             @for token in tokens {
                 tr {
                     td { code { (short(&token.token)) } }
+                    td { (token.common_name.as_deref().unwrap_or("any")) }
                     td { (token.note.as_deref().unwrap_or("—")) }
                     td { (token.created_at_unix) }
                     td { (token.expires_at_unix.map(|t| t.to_string()).unwrap_or_else(|| "never".to_string())) }
@@ -152,6 +165,8 @@ fn short(token: &str) -> String {
 
 #[derive(Deserialize)]
 struct MintTokenForm {
+    #[serde(default, deserialize_with = "empty_string_as_none_str")]
+    common_name: Option<String>,
     #[serde(default, deserialize_with = "empty_string_as_none")]
     expires_in_secs: Option<i64>,
     #[serde(default, deserialize_with = "empty_string_as_none_str")]
@@ -181,16 +196,38 @@ where
 }
 
 async fn mint_token_page(State(state): State<AppState>, Form(form): Form<MintTokenForm>) -> Response {
-    match state.client.mint_token(form.expires_in_secs, form.note).await {
+    // Validate what the QR code needs before minting, so a bad config
+    // doesn't leave an orphaned token behind.
+    if let (Some(url), Some(_)) = (&state.enrollment_url, &form.common_name)
+        && let Err(error) = EnrollmentLink::new(url, state.streaming_port, state.api_port, "x", "x")
+    {
+        return error_page(&format!("Can't build an enrollment QR code: {error}"));
+    }
+    match state
+        .client
+        .mint_token(form.expires_in_secs, form.note, form.common_name.clone())
+        .await
+    {
         Ok(token) => {
-            let qr = EnrollmentQr {
-                token: token.clone(),
-                enrollment_url: state.enrollment_url.clone(),
+            let link = match (&state.enrollment_url, &form.common_name) {
+                (Some(url), Some(name)) => {
+                    EnrollmentLink::new(url, state.streaming_port, state.api_port, name, &token).ok()
+                }
+                _ => None,
             };
             let body = html! {
                 p { "Token minted. This is the only time the full value is shown here:" }
                 p { code { (token) } }
-                div { (qr) }
+                @if let Some(link) = &link {
+                    p { "Scan with the TAK client (ATAK, OmniTAK, …) on the device — it enrolls and connects on its own. The token works once, for " strong { (link.username) } " only:" }
+                    div { (link) }
+                    p { "On the device itself, tap instead: " a href=(link.to_uri()) { "open in TAK client" } }
+                    p { small { "Anyone who sees this code before the device uses it can enroll as that device — show it only to its user." } }
+                } @else if form.common_name.is_none() {
+                    p { "No QR code: enter a device name to get one (the token is bound to it)." }
+                } @else {
+                    p { "No QR code: set MICROTAK_ADMIN_WEB_ENROLLMENT_URL (where devices reach the server) to get one." }
+                }
                 p { a href="/tokens" { "Back to token list" } }
             };
             Html(layout("Token Minted", body).into_string()).into_response()

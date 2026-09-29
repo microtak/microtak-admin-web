@@ -32,6 +32,9 @@ pub struct EnrollmentToken {
     pub created_at_unix: i64,
     pub expires_at_unix: Option<i64>,
     pub note: Option<String>,
+    /// The device name the token is bound to, if any.
+    #[serde(default)]
+    pub common_name: Option<String>,
     pub used: bool,
     pub used_by_common_name: Option<String>,
     #[allow(dead_code)]
@@ -56,6 +59,8 @@ struct MintTokenRequest {
     expires_in_secs: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     note: Option<String>,
+    #[serde(rename = "commonName", skip_serializing_if = "Option::is_none")]
+    common_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -152,6 +157,7 @@ impl MicrotakClient {
         &self,
         expires_in_secs: Option<i64>,
         note: Option<String>,
+        common_name: Option<String>,
     ) -> Result<String, ClientError> {
         let response = self
             .http
@@ -159,6 +165,7 @@ impl MicrotakClient {
             .json(&MintTokenRequest {
                 expires_in_secs,
                 note,
+                common_name,
             })
             .send()
             .await?;

@@ -28,7 +28,14 @@ fn unique_temp_dir(label: &str) -> std::path::PathBuf {
 
 async fn enroll(base_url: &str, common_name: &str, token: &str) -> (String, rcgen::KeyPair) {
     let (csr_pem, key) = pki::build_csr(common_name).unwrap();
-    let client = reqwest::Client::new();
+    // The enrollment port is HTTPS-only with a cert from the server's own
+    // CA; like a real device on first contact, trust it and pin the CA
+    // afterwards (the tests below get the CA from the running App).
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .no_proxy()
+        .build()
+        .unwrap();
     let response = client
         .post(format!("{base_url}/Marti/api/tls/signClient/v2?token={token}"))
         .header("Content-Type", "application/octet-stream")
@@ -76,7 +83,7 @@ async fn setup() -> (axum::Router, Arc<microtak_server::missions::MissionStore>,
     let bootstrap_token = std::fs::read_to_string(bootstrap_path).unwrap();
     tokio::spawn(app.run());
 
-    let enrollment_base_url = format!("http://{enrollment_addr}");
+    let enrollment_base_url = format!("https://{enrollment_addr}");
     let (admin_cert, admin_key) =
         enroll(&enrollment_base_url, "web-admin", bootstrap_token.trim()).await;
 
@@ -100,7 +107,9 @@ async fn setup() -> (axum::Router, Arc<microtak_server::missions::MissionStore>,
 
     let state = AppState {
         client: Arc::new(client),
-        enrollment_url: None,
+        enrollment_url: Some("https://192.168.1.10:8446".to_string()),
+        streaming_port: 8089,
+        api_port: 8443,
     };
     let router = pages::router(state);
 
@@ -153,14 +162,35 @@ async fn e2e_web_ui_mints_lists_and_revokes_a_real_token() {
     assert_eq!(status, StatusCode::OK);
     assert!(!body.contains("<code>"), "no tokens minted yet");
 
-    let (status, body) = post_form(&router, "/tokens", "expires_in_secs=&note=for+test+device").await;
+    // Without a device name: a token, but no QR code (it'd have no
+    // username to carry).
+    let (status, body) = post_form(&router, "/tokens", "common_name=&expires_in_secs=&note=unbound").await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("Token minted"));
+    assert!(!body.contains("<svg"), "no QR code without a device name");
+
+    // With one: the token is bound to it, and the page carries the
+    // standard TAK enrollment link as a QR code and a tap-to-open link.
+    let (status, body) = post_form(
+        &router,
+        "/tokens",
+        "common_name=phone-1&expires_in_secs=&note=for+test+device",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
     assert!(body.contains("<svg"), "expected a real inline QR SVG");
+    let link_start = body.find("tak://com.atakmap.app/enroll?").expect("a tak:// enrollment link");
+    let link = &body[link_start..body[link_start..].find('"').unwrap() + link_start];
+    assert!(
+        link.starts_with("tak://com.atakmap.app/enroll?host=192.168.1.10&amp;username=phone-1&amp;token="),
+        "{link}"
+    );
+    assert!(!link.contains("enrollmentport="), "default port 8446 is left out: {link}");
 
     let (status, body) = get(&router, "/tokens").await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("for test device"));
+    assert!(body.contains("<td>phone-1</td>"), "the list shows the binding");
     assert!(body.contains("Revoke"));
 
     // Extract the token value from the raw href the list rendered so we

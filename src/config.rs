@@ -21,12 +21,15 @@ pub struct Config {
     /// `src/auth.rs`'s own doc comment for why this is a deliberate v1
     /// simplification, not a finished access-control system.
     pub web_password: String,
-    /// Optional: the microtak-server's *enrollment* endpoint base URL
-    /// (different port than the Marti API, plain HTTP, unauthenticated --
-    /// e.g. `http://microtak.example.com:8446`). If set, minted tokens'
-    /// QR codes include it so a provisioning client knows where to enroll,
-    /// not just the bare token value.
+    /// Optional: where devices reach the microtak-server's enrollment
+    /// endpoint (HTTPS only), e.g. `https://192.168.1.10:8446`, or
+    /// `https://tak.example.com` behind a reverse proxy on 443. Needed for
+    /// enrollment QR codes (`tak://…/enroll?host=…`).
     pub enrollment_url: Option<String>,
+    /// Streaming (mTLS CoT) and Marti API ports devices connect to --
+    /// included in the QR code when not the TAK defaults (8089/8443).
+    pub streaming_port: u16,
+    pub api_port: u16,
 }
 
 impl Config {
@@ -46,7 +49,18 @@ impl Config {
                 .unwrap_or_else(|error| panic!("invalid MICROTAK_ADMIN_WEB_BIND: {error}")),
             web_password: require_env("MICROTAK_ADMIN_WEB_PASSWORD"),
             enrollment_url: std::env::var("MICROTAK_ADMIN_WEB_ENROLLMENT_URL").ok(),
+            streaming_port: port_env("MICROTAK_ADMIN_WEB_STREAMING_PORT", crate::qr::DEFAULT_STREAMING_PORT),
+            api_port: port_env("MICROTAK_ADMIN_WEB_API_PORT", crate::qr::DEFAULT_API_PORT),
         }
+    }
+}
+
+fn port_env(name: &str, default: u16) -> u16 {
+    match std::env::var(name) {
+        Ok(value) => value
+            .parse()
+            .unwrap_or_else(|error| panic!("invalid {name} '{value}': {error}")),
+        Err(_) => default,
     }
 }
 
