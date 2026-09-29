@@ -67,8 +67,16 @@ username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
   new one (device name, optional expiry and note), and get the standard TAK
   enrollment QR code for it — an inline SVG generated server-side, plus a
   tap-to-open `tak://` link for when the page is open on the device itself.
-- **`/missions`** and **`/missions/:name`** — list missions, and per
-  mission, see and manage its `Owner`/`Subscriber` role assignments.
+- **`/groups`** — groups ("channels", as on the official TAK Server):
+  create and delete groups, add members with a direction (**in** = may send
+  into the group, **out** = receives from it, or both), remove members.
+  Tokens can carry groups too (both ways / send-only / receive-only), so a
+  device scanning its QR code lands in its team. Devices without groups are
+  in `__ANON__`; missions are only visible within their groups.
+- **`/missions`** and **`/missions/:name`** — list missions with the groups
+  they're visible in, and per mission, see and manage its `Owner` /
+  `Subscriber` / read-only subscriber (`MISSION_READONLY_SUBSCRIBER`) role
+  assignments.
   Assigning/revoking a role that would leave a mission with zero owners
   (microtak-server's own last-owner protection) surfaces as a real,
   readable error in the page, not a stack trace.

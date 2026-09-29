@@ -260,3 +260,40 @@ async fn e2e_web_ui_manages_real_mission_roles() {
     let (_, body) = get(&router, "/missions/Web%20UI%20Test").await;
     assert!(body.contains("web-admin"));
 }
+
+/// Group management through the real web UI against a real server: create
+/// a group, add a member with a direction, see both, mint a token that
+/// carries the group, remove the member, delete the group.
+#[tokio::test]
+async fn e2e_web_ui_manages_real_groups() {
+    let (router, _app, _creds_dir) = setup().await;
+
+    let (status, _) = post_form(&router, "/groups", "name=Red&description=red+team").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (status, _) = post_form(&router, "/groups/Red/members", "identity=phone-1&direction=OUT").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+
+    let (status, body) = get(&router, "/groups").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("<h2>Red"), "{body}");
+    assert!(body.contains("red team"));
+    assert!(body.contains("<td>phone-1</td><td>out</td>"), "{body}");
+
+    // A token carrying the group, and the token list showing it.
+    let (status, _) = post_form(&router, "/tokens", "common_name=phone-2&groups=Red&groups_in=&groups_out=&expires_in_secs=&note=").await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = get(&router, "/tokens").await;
+    assert!(body.contains("<td>Red</td>"), "{body}");
+
+    // An unknown group surfaces as a readable error, not a panic.
+    let (status, body) = post_form(&router, "/tokens", "common_name=phone-3&groups=Nope").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("unknown group"), "{body}");
+
+    let (status, _) = post_form(&router, "/groups/Red/members/phone-1/remove", "").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (status, _) = post_form(&router, "/groups/Red/delete", "").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (_, body) = get(&router, "/groups").await;
+    assert!(!body.contains("<h2>Red"));
+}

@@ -30,6 +30,10 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(|| async { Redirect::to("/tokens") }))
         .route("/tokens", get(list_tokens_page).post(mint_token_page))
         .route("/tokens/:token/revoke", post(revoke_token_page))
+        .route("/groups", get(list_groups_page).post(create_group_page))
+        .route("/groups/:name/delete", post(delete_group_page))
+        .route("/groups/:name/members", post(set_member_page))
+        .route("/groups/:name/members/:identity/remove", post(remove_member_page))
         .route("/missions", get(list_missions_page))
         .route("/missions/:name", get(mission_detail_page).post(assign_role_page))
         .route(
@@ -53,6 +57,8 @@ fn layout(title: &str, body: Markup) -> Markup {
                     a href="/tokens" { "Enrollment Tokens" }
                     " · "
                     a href="/missions" { "Missions" }
+                    " · "
+                    a href="/groups" { "Groups" }
                 }
                 hr;
                 h1 { (title) }
@@ -105,6 +111,12 @@ fn render_tokens_list(tokens: &[crate::client::EnrollmentToken]) -> Markup {
                 label { "Device name: " input type="text" name="common_name" placeholder="e.g. phone-1"; }
                 small { " — binds the token to this identity; needed for the QR code" }
                 br;
+                label { "Groups, both ways (optional): " input type="text" name="groups" placeholder="Red, Blue"; }
+                br;
+                label { "Send-only groups (IN, optional): " input type="text" name="groups_in"; }
+                br;
+                label { "Receive-only groups (OUT, optional): " input type="text" name="groups_out"; }
+                br;
                 label { "Expires in (seconds, optional): " input type="number" name="expires_in_secs"; }
                 br;
                 label { "Note (optional): " input type="text" name="note"; }
@@ -113,11 +125,12 @@ fn render_tokens_list(tokens: &[crate::client::EnrollmentToken]) -> Markup {
             }
         }
         table {
-            tr { th{"Token"} th{"For"} th{"Note"} th{"Created"} th{"Expires"} th{"Status"} th{} }
+            tr { th{"Token"} th{"For"} th{"Groups"} th{"Note"} th{"Created"} th{"Expires"} th{"Status"} th{} }
             @for token in tokens {
                 tr {
                     td { code { (short(&token.token)) } }
                     td { (token.common_name.as_deref().unwrap_or("any")) }
+                    td { (crate::client::describe_grants(&token.groups)) }
                     td { (token.note.as_deref().unwrap_or("—")) }
                     td { (token.created_at_unix) }
                     td { (token.expires_at_unix.map(|t| t.to_string()).unwrap_or_else(|| "never".to_string())) }
@@ -171,6 +184,22 @@ struct MintTokenForm {
     expires_in_secs: Option<i64>,
     #[serde(default, deserialize_with = "empty_string_as_none_str")]
     note: Option<String>,
+    #[serde(default)]
+    groups: String,
+    #[serde(default)]
+    groups_in: String,
+    #[serde(default)]
+    groups_out: String,
+}
+
+/// A comma-separated form field -> trimmed, non-empty names.
+fn name_list(field: &str) -> Vec<String> {
+    field
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn empty_string_as_none<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
@@ -205,7 +234,16 @@ async fn mint_token_page(State(state): State<AppState>, Form(form): Form<MintTok
     }
     match state
         .client
-        .mint_token(form.expires_in_secs, form.note, form.common_name.clone())
+        .mint_token(
+            form.expires_in_secs,
+            form.note,
+            form.common_name.clone(),
+            crate::client::GroupLists {
+                groups: name_list(&form.groups),
+                groups_in: name_list(&form.groups_in),
+                groups_out: name_list(&form.groups_out),
+            },
+        )
         .await
     {
         Ok(token) => {
@@ -244,6 +282,120 @@ async fn revoke_token_page(State(state): State<AppState>, Path(token): Path<Stri
 }
 
 // ---------------------------------------------------------------------
+// Groups ("channels")
+// ---------------------------------------------------------------------
+
+async fn list_groups_page(State(state): State<AppState>) -> Response {
+    match state.client.list_groups().await {
+        Ok(groups) => Html(layout("Groups", render_groups(&groups)).into_string()).into_response(),
+        Err(error) => error_response(&error),
+    }
+}
+
+fn render_groups(groups: &[crate::client::GroupInfo]) -> Markup {
+    html! {
+        p {
+            "As on the official TAK Server: a device " strong{"in"} " a group may send into it, a device "
+            strong{"out"} " of a group receives from it. Devices without groups are in __ANON__ and see each "
+            "other; missions are only visible within their groups."
+        }
+        fieldset {
+            legend { "Create a group" }
+            form method="post" action="/groups" {
+                label { "Name: " input type="text" name="name" required; }
+                br;
+                label { "Description (optional): " input type="text" name="description"; }
+                br;
+                button type="submit" { "Create" }
+            }
+        }
+        @for group in groups {
+            h2 { (group.name) " " small { "(bitpos " (group.bitpos) ")" } }
+            @if let Some(description) = &group.description { p { (description) } }
+            table {
+                tr { th{"Identity"} th{"Direction"} th{} }
+                @for (identity, direction) in &group.members {
+                    tr {
+                        td { (identity) }
+                        td { (direction.to_lowercase()) }
+                        td {
+                            form class="inline" method="post"
+                                action=(format!("/groups/{}/members/{}/remove", urlencode(&group.name), urlencode(identity))) {
+                                button type="submit" { "Remove" }
+                            }
+                        }
+                    }
+                }
+            }
+            form method="post" action=(format!("/groups/{}/members", urlencode(&group.name))) {
+                label { "Add / change member (CN): " input type="text" name="identity" required; }
+                " "
+                select name="direction" {
+                    option value="BOTH" { "both" }
+                    option value="IN" { "in (send only)" }
+                    option value="OUT" { "out (receive only)" }
+                }
+                " "
+                button type="submit" { "Set" }
+            }
+            @if group.name != "__ANON__" {
+                form class="inline" method="post" action=(format!("/groups/{}/delete", urlencode(&group.name))) {
+                    button type="submit" { "Delete group " (group.name) }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateGroupForm {
+    name: String,
+    #[serde(default, deserialize_with = "empty_string_as_none_str")]
+    description: Option<String>,
+}
+
+async fn create_group_page(State(state): State<AppState>, Form(form): Form<CreateGroupForm>) -> Response {
+    match state.client.create_group(form.name.trim(), form.description).await {
+        Ok(()) => Redirect::to("/groups").into_response(),
+        Err(error) => error_response(&error),
+    }
+}
+
+async fn delete_group_page(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    match state.client.delete_group(&name).await {
+        Ok(()) => Redirect::to("/groups").into_response(),
+        Err(error) => error_response(&error),
+    }
+}
+
+#[derive(Deserialize)]
+struct SetMemberForm {
+    identity: String,
+    direction: String,
+}
+
+async fn set_member_page(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Form(form): Form<SetMemberForm>,
+) -> Response {
+    match state.client.set_group_member(&name, form.identity.trim(), &form.direction).await {
+        Ok(()) => Redirect::to("/groups").into_response(),
+        Err(error) => error_response(&error),
+    }
+}
+
+async fn remove_member_page(
+    State(state): State<AppState>,
+    Path((name, identity)): Path<(String, String)>,
+) -> Response {
+    match state.client.remove_group_member(&name, &identity).await {
+        Ok(()) => Redirect::to("/groups").into_response(),
+        Err(error) => error_response(&error),
+    }
+}
+
+// ---------------------------------------------------------------------
 // Missions / roles
 // ---------------------------------------------------------------------
 
@@ -252,11 +404,12 @@ async fn list_missions_page(State(state): State<AppState>) -> Response {
         Ok(missions) => {
             let body = html! {
                 table {
-                    tr { th{"Name"} th{"Creator"} th{"Roles"} th{} }
+                    tr { th{"Name"} th{"Creator"} th{"Groups"} th{"Roles"} th{} }
                     @for mission in &missions {
                         tr {
                             td { (mission.name) }
                             td { (mission.creator_uid) }
+                            td { (mission.groups.join(", ")) }
                             td { (mission.roles.len()) }
                             td { a href=(format!("/missions/{}", urlencode(&mission.name))) { "Manage" } }
                         }
@@ -288,6 +441,8 @@ async fn mission_detail_page(State(state): State<AppState>, Path(name): Path<Str
         Ok(Some(mission)) => {
             let body = html! {
                 p { "Creator: " (mission.creator_uid) }
+                p { "Visible in groups: " (mission.groups.join(", ")) }
+                p { "New subscribers get: " (mission.default_role.as_deref().unwrap_or("subscriber")) }
                 table {
                     tr { th{"Identity"} th{"Role"} th{} }
                     @for (uid, role) in &mission.roles {
@@ -312,6 +467,7 @@ async fn mission_detail_page(State(state): State<AppState>, Path(name): Path<Str
                             select name="role" {
                                 option value="owner" { "owner" }
                                 option value="subscriber" { "subscriber" }
+                                option value="readonly_subscriber" { "read-only subscriber" }
                             }
                         }
                         br;
