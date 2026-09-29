@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/microtak/microtak-admin-web/compare/v0.3.0...v0.4.0) (2026-09-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* the QR payload format changed; MICROTAK_ADMIN_WEB_ENROLLMENT_URL must be an https:// URL.
+
+### Features
+
+* groups (channels) page; groups on tokens; read-only mission role ([#6](https://github.com/microtak/microtak-admin-web/issues/6)) ([44b71b4](https://github.com/microtak/microtak-admin-web/commit/44b71b484b56e2429ea06914448d824edf041bfa))
+* standard tak:// enrollment QR codes, tokens bound to a device ([#4](https://github.com/microtak/microtak-admin-web/issues/4)) ([efeff58](https://github.com/microtak/microtak-admin-web/commit/efeff58ed179ef9cf1d905f351c962712facaa1c))
+
 ## [0.3.0](https://github.com/microtak/microtak-admin-web/compare/v0.2.0...v0.3.0) (2026-09-24)
 
 
