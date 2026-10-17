@@ -244,58 +244,46 @@ async fn e2e_web_ui_mints_lists_and_revokes_a_real_token() {
     assert!(body.contains("revoked"));
 }
 
-/// Mission role management through the real web UI: create a mission
-/// directly against the real server (the web UI doesn't create missions,
-/// only manages roles on existing ones), assign a role to a second
-/// identity through the form and confirm it's reflected, then confirm the
-/// last-owner protection's 409 surfaces as a real, readable error in the
-/// UI rather than a panic.
-///
-/// Note on scenario shape: every request through this UI is authenticated
-/// as the single configured admin identity (`web-admin`) -- so demoting
-/// *that* identity's own Owner role mid-test would correctly cost it the
-/// authorization to make any further role-management calls at all (a real
-/// thing this test found by trying it naively first). The valid way to
-/// exercise the last-owner protection here is to attempt revoking
-/// `web-admin`'s own role while it's still the mission's *sole* owner --
-/// the mission was never given a second owner, so this must be rejected.
+/// Mission roles through the real web UI against the official mission API:
+/// a mission with a default role (the official server only allows role
+/// changes there) and a subscriber; promote it through the form, see it,
+/// then remove the subscription.
 #[tokio::test]
 async fn e2e_web_ui_manages_real_mission_roles() {
     let (router, missions, _creds_dir) = setup().await;
-
+    let mission = missions
+        .create(
+            microtak_server::missions::NewMission {
+                guid: "6f1c0000-0000-4000-8000-0000000000aa".into(),
+                name: "Web UI Test".into(),
+                fields: Default::default(),
+                tool: "public".into(),
+                creator_uid: "ANDROID-ADMIN".into(),
+                groups: ["__ANON__".to_string()].into(),
+                password_hash: None,
+                default_role: Some(microtak_server::missions::Role::Subscriber),
+                invite_only: false,
+            },
+            1_000,
+        )
+        .unwrap();
     missions
-        .create("Web UI Test", None, "web-admin", vec![], 1_000)
+        .subscribe(&mission.guid, "ANDROID-SECOND", "second-device", microtak_server::missions::Role::Subscriber, 2_000, |id| id.into())
         .unwrap();
 
     let (status, body) = get(&router, "/missions").await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("Web UI Test"));
 
-    // Positive case: assign a Subscriber role to a second identity through
-    // the real form and confirm it's actually reflected by the server.
-    let (status, _) = post_form(
-        &router,
-        "/missions/Web%20UI%20Test",
-        "uid=second-device&role=subscriber",
-    )
-    .await;
+    let (status, _) = post_form(&router, "/missions/Web%20UI%20Test", "uid=ANDROID-SECOND&role=MISSION_OWNER").await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-
     let (_, body) = get(&router, "/missions/Web%20UI%20Test").await;
-    assert!(body.contains("second-device"));
-    assert!(body.contains("subscriber"));
+    assert!(body.contains("ANDROID-SECOND") && body.contains("MISSION_OWNER"), "{body}");
 
-    // Negative case: web-admin is still the mission's *sole* owner --
-    // revoking its own role must be rejected (the last-owner protection),
-    // and the UI must show a real, readable error, not panic or silently
-    // redirect as if it worked.
-    let (status, body) = post_form(&router, "/missions/Web%20UI%20Test/roles/web-admin/revoke", "").await;
-    assert_eq!(status, StatusCode::OK, "expected an in-page error, not a redirect");
-    assert!(body.contains("last remaining owner"), "got: {body}");
-
-    // Confirm it genuinely wasn't revoked, not just that the page said so.
+    let (status, _) = post_form(&router, "/missions/Web%20UI%20Test/roles/ANDROID-SECOND/revoke", "").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
     let (_, body) = get(&router, "/missions/Web%20UI%20Test").await;
-    assert!(body.contains("web-admin"));
+    assert!(!body.contains("ANDROID-SECOND"), "the subscription is gone: {body}");
 }
 
 /// Group management through the real web UI against a real server: create

@@ -491,13 +491,13 @@ async fn list_missions_page(State(state): State<AppState>) -> Response {
         Ok(missions) => {
             let body = html! {
                 table {
-                    tr { th{"Name"} th{"Creator"} th{"Groups"} th{"Roles"} th{} }
+                    tr { th{"Name"} th{"Creator"} th{"Groups"} th{"Default role"} th{} }
                     @for mission in &missions {
                         tr {
                             td { (mission.name) }
                             td { (mission.creator_uid) }
                             td { (mission.groups.join(", ")) }
-                            td { (mission.roles.len()) }
+                            td { (mission.default_role.as_ref().map(|r| r.role.as_str()).unwrap_or("-")) }
                             td { a href=(format!("/missions/{}", urlencode(&mission.name))) { "Manage" } }
                         }
                     }
@@ -525,41 +525,49 @@ fn urlencode(segment: &str) -> String {
 
 async fn mission_detail_page(State(state): State<AppState>, Path(name): Path<String>) -> Response {
     match state.client.get_mission(&name).await {
-        Ok(Some(mission)) => {
+        Ok(Some((mission, subscriptions))) => {
+            let roles_enabled = mission.default_role.is_some();
             let body = html! {
                 p { "Creator: " (mission.creator_uid) }
                 p { "Visible in groups: " (mission.groups.join(", ")) }
-                p { "New subscribers get: " (mission.default_role.as_deref().unwrap_or("subscriber")) }
+                p { "New subscribers get: " (mission.default_role.as_ref().map(|r| r.role.as_str()).unwrap_or("MISSION_SUBSCRIBER (default role not set)")) }
                 table {
-                    tr { th{"Identity"} th{"Role"} th{} }
-                    @for (uid, role) in &mission.roles {
+                    tr { th{"Client uid"} th{"User"} th{"Role"} th{} }
+                    @for sub in &subscriptions {
                         tr {
-                            td { (uid) }
-                            td { (role) }
+                            td { (sub.client_uid) }
+                            td { (sub.username) }
+                            td { (sub.role.role) }
                             td {
-                                form class="inline" method="post" action=(format!("/missions/{}/roles/{}/revoke", urlencode(&name), urlencode(uid))) {
-                                    button type="submit" { "Revoke" }
+                                @if roles_enabled {
+                                    form class="inline" method="post" action=(format!("/missions/{}/roles/{}/revoke", urlencode(&name), urlencode(&sub.client_uid))) {
+                                        button type="submit" { "Remove" }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                fieldset {
-                    legend { "Assign a role" }
-                    form method="post" action=(format!("/missions/{}", urlencode(&name))) {
-                        label { "Identity (CN): " input type="text" name="uid" required; }
-                        br;
-                        label {
-                            "Role: "
-                            select name="role" {
-                                option value="owner" { "owner" }
-                                option value="subscriber" { "subscriber" }
-                                option value="readonly_subscriber" { "read-only subscriber" }
+                @if roles_enabled {
+                    fieldset {
+                        legend { "Set a role" }
+                        form method="post" action=(format!("/missions/{}", urlencode(&name))) {
+                            label { "Client uid: " input type="text" name="uid" required; }
+                            br;
+                            label {
+                                "Role: "
+                                select name="role" {
+                                    option value="MISSION_OWNER" { "owner" }
+                                    option value="MISSION_SUBSCRIBER" { "subscriber" }
+                                    option value="MISSION_READONLY_SUBSCRIBER" { "read-only subscriber" }
+                                }
                             }
+                            br;
+                            button type="submit" { "Set" }
                         }
-                        br;
-                        button type="submit" { "Assign" }
                     }
+                } @else {
+                    p { "Roles can only be changed on missions with a default role (as on the official TAK Server)." }
                 }
                 p { a href="/missions" { "Back to mission list" } }
             };
@@ -581,7 +589,7 @@ async fn assign_role_page(
     Path(name): Path<String>,
     Form(form): Form<AssignRoleForm>,
 ) -> Response {
-    match state.client.assign_role(&name, &form.uid, &form.role).await {
+    match state.client.set_role(&name, &form.uid, Some(&form.role)).await {
         Ok(()) => Redirect::to(&format!("/missions/{}", urlencode(&name))).into_response(),
         Err(error) => error_response(&error),
     }
@@ -591,10 +599,8 @@ async fn revoke_role_page(
     State(state): State<AppState>,
     Path((name, uid)): Path<(String, String)>,
 ) -> Response {
-    match state.client.revoke_role(&name, &uid).await {
+    match state.client.set_role(&name, &uid, None).await {
         Ok(()) => Redirect::to(&format!("/missions/{}", urlencode(&name))).into_response(),
-        // The last-owner-protection 409 (or any other rejection) surfaces
-        // as a real, readable error here, not a panic or a raw stack trace.
         Err(error) => error_response(&error),
     }
 }

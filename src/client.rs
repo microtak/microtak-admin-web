@@ -47,18 +47,41 @@ pub struct EnrollmentToken {
 
 /// Mirrors `microtak_server::missions::Mission` -- see the note on
 /// `EnrollmentToken` above.
-#[derive(Debug, Clone, Deserialize)]
+/// The official `ApiResponse` envelope around `data`.
+#[derive(Debug, Deserialize)]
+struct Envelope<T> {
+    data: T,
+}
+
+/// An official `MissionRole` (`{"type": "MISSION_OWNER", ...}`).
+#[derive(Debug, Deserialize, Clone)]
+pub struct MissionRole {
+    #[serde(rename = "type")]
+    pub role: String,
+}
+
+/// The official `Mission` JSON, the fields shown here.
+#[derive(Debug, Deserialize, Clone)]
 pub struct Mission {
     pub name: String,
-    #[allow(dead_code)]
-    pub description: Option<String>,
+    #[serde(default)]
+    pub guid: String,
+    #[serde(rename = "creatorUid", default)]
     pub creator_uid: String,
-    pub roles: std::collections::BTreeMap<String, String>,
-    /// The groups the mission is visible in (older servers omit this).
     #[serde(default)]
     pub groups: Vec<String>,
-    #[serde(rename = "defaultRole", default)]
-    pub default_role: Option<String>,
+    #[serde(rename = "defaultRole")]
+    pub default_role: Option<MissionRole>,
+}
+
+/// An official `MissionSubscription` without its token.
+#[derive(Debug, Deserialize, Clone)]
+pub struct Subscription {
+    #[serde(rename = "clientUid")]
+    pub client_uid: String,
+    #[serde(default)]
+    pub username: String,
+    pub role: MissionRole,
 }
 
 /// A group membership handed out at enrollment.
@@ -121,11 +144,6 @@ struct MintTokenResponse {
     token: String,
 }
 
-#[derive(Serialize)]
-struct AssignRoleRequest<'a> {
-    uid: &'a str,
-    role: &'a str,
-}
 
 #[derive(Deserialize)]
 struct ApiErrorBody {
@@ -242,44 +260,54 @@ impl MicrotakClient {
         Ok(())
     }
 
+    /// Every mission, password-protected and role-enabled ones included.
     pub async fn list_missions(&self) -> Result<Vec<Mission>, ClientError> {
         let response = self
             .http
-            .get(format!("{}/Marti/api/missions", self.base_url))
+            .get(format!("{}/Marti/api/missions?passwordProtected=true&defaultRole=true", self.base_url))
             .send()
             .await?;
         let response = check_status(response).await?;
-        Ok(response.json().await?)
+        let envelope: Envelope<Vec<Mission>> = response.json().await?;
+        Ok(envelope.data)
     }
 
-    pub async fn get_mission(&self, name: &str) -> Result<Option<Mission>, ClientError> {
+    /// The mission and its subscriptions; `None` if there is no such mission.
+    pub async fn get_mission(&self, name: &str) -> Result<Option<(Mission, Vec<Subscription>)>, ClientError> {
         let response = self
             .http
-            .get(format!(
-                "{}/Marti/api/missions/{}",
-                self.base_url,
-                urlencoding_light(name)
-            ))
+            .get(format!("{}/Marti/api/missions/{}", self.base_url, urlencoding_light(name)))
             .send()
             .await?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
+        if response.status() == reqwest::StatusCode::NOT_FOUND || response.status() == reqwest::StatusCode::GONE {
             return Ok(None);
         }
         let response = check_status(response).await?;
-        Ok(Some(response.json().await?))
-    }
-
-    pub async fn assign_role(&self, mission: &str, uid: &str, role: &str) -> Result<(), ClientError> {
+        let envelope: Envelope<Vec<Mission>> = response.json().await?;
+        let Some(mission) = envelope.data.into_iter().next() else { return Ok(None) };
         let response = self
             .http
-            .put(format!(
-                "{}/Marti/api/missions/{}/role",
-                self.base_url,
-                urlencoding_light(mission)
-            ))
-            .json(&AssignRoleRequest { uid, role })
+            .get(format!("{}/Marti/api/missions/{}/subscriptions/roles", self.base_url, urlencoding_light(name)))
             .send()
             .await?;
+        let response = check_status(response).await?;
+        let subscriptions: Envelope<Vec<Subscription>> = response.json().await?;
+        Ok(Some((mission, subscriptions.data)))
+    }
+
+    /// The official `PUT /missions/{name}/role`: `role` for the client's
+    /// subscription, or none to remove it.
+    pub async fn set_role(&self, mission: &str, client_uid: &str, role: Option<&str>) -> Result<(), ClientError> {
+        let mut url = format!(
+            "{}/Marti/api/missions/{}/role?clientUid={}",
+            self.base_url,
+            urlencoding_light(mission),
+            urlencoding_light(client_uid)
+        );
+        if let Some(role) = role {
+            url.push_str(&format!("&role={}", urlencoding_light(role)));
+        }
+        let response = self.http.put(url).send().await?;
         check_status(response).await?;
         Ok(())
     }
@@ -381,20 +409,6 @@ impl MicrotakClient {
         Ok(())
     }
 
-    pub async fn revoke_role(&self, mission: &str, uid: &str) -> Result<(), ClientError> {
-        let response = self
-            .http
-            .delete(format!(
-                "{}/Marti/api/missions/{}/role/{}",
-                self.base_url,
-                urlencoding_light(mission),
-                urlencoding_light(uid)
-            ))
-            .send()
-            .await?;
-        check_status(response).await?;
-        Ok(())
-    }
 }
 
 /// A row of the official `GET /Marti/api/certadmin/cert` (`TakCert`).
