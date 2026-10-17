@@ -35,14 +35,14 @@ All via environment variables:
 
 ### Bootstrapping the admin certificate
 
-This tool doesn't enroll itself. You need an admin device already enrolled
-against microtak-server first, while it's still open — by default
-(`enrollment_mode = "auto"`), a fresh server accepts enrollment with no
-token until its configured admin device exists, then locks down for
-everyone else from that moment on, live, no restart (see
-microtak-server's own `docs/ARCHITECTURE.md` "Enrollment lockdown / admin
-API" section). Point `MICROTAK_ADMIN_WEB_CERT`/`_KEY`/`_CA` at that admin
-device's issued credentials.
+This tool doesn't enroll itself. Enroll the admin device first with the
+server's one-time bootstrap token (microtak-server writes it to
+`data_dir/bootstrap-token` on first start; see its README, or
+`microtak-admin-cli enroll`), then point `MICROTAK_ADMIN_WEB_CERT`/`_KEY`/
+`_CA` at the issued credentials.
+
+Version 0.4 and later use the official Mission API and need
+microtak-server 0.9 or later.
 
 ## Running
 
@@ -74,12 +74,11 @@ username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
   device scanning its QR code lands in its team. Devices without groups are
   in `__ANON__`; missions are only visible within their groups.
 - **`/missions`** and **`/missions/:name`** — list missions with the groups
-  they're visible in, and per mission, see and manage its `Owner` /
-  `Subscriber` / read-only subscriber (`MISSION_READONLY_SUBSCRIBER`) role
-  assignments.
-  Assigning/revoking a role that would leave a mission with zero owners
-  (microtak-server's own last-owner protection) surfaces as a real,
-  readable error in the page, not a stack trace.
+  they're visible in, and per mission, see and change its subscribers'
+  roles (`MISSION_OWNER`, `MISSION_SUBSCRIBER`,
+  `MISSION_READONLY_SUBSCRIBER`) through the official Mission API. Errors
+  from the server (e.g. a caller who isn't the mission's owner) show up as
+  a readable message in the page, not a stack trace.
 - **`/devices`** — every issued certificate from the official TAK Server
   certificate admin API (id, user, status, client uid, dates, hash).
   "revoke" for a lost device's certificate (it stops working at once, live
@@ -124,6 +123,13 @@ origin, every state-changing request must come from this UI itself
 (`Sec-Fetch-Site: same-origin`, or an `Origin`/`Referer` matching the
 host) — a form that another site makes your browser submit is refused.
 Scripts should use microtak-admin-cli instead.
+
+## Security
+
+Run it on localhost or a trusted network only (the default bind is
+`127.0.0.1:8090`); see "Auth" above for why. It holds the admin
+certificate and key, so keep those owner-only. To report a vulnerability,
+see [SECURITY.md](SECURITY.md).
 
 ## Development
 
