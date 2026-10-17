@@ -150,6 +150,18 @@ crate at all) and drives this tool's real router against it end to end.
 checkout is present first, with a clear error if it isn't; see
 `scripts/build.sh --help`.
 
+### Coverage
+
+```sh
+cargo install cargo-llvm-cov --locked   # once; needs `rustup component add llvm-tools-preview`
+cargo llvm-cov --ignore-filename-regex 'microtak-server/' --open
+cargo llvm-cov --ignore-filename-regex 'microtak-server/' --summary-only
+```
+
+CI's **Code coverage** job runs the same on every push and pull request:
+the per-file table is in the run's summary, `lcov.info` is attached as the
+`coverage-lcov` artifact. On 2026-10-17: 85.3 % of lines (the sibling microtak-server crate the e2e tests run is left out of the report).
+
 ## License
 
 AGPL-3.0-or-later — see [LICENSE](LICENSE). Same reasoning as
