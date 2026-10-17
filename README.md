@@ -6,6 +6,8 @@ and devices (certificate revocation, identity blocks). It's a thin client over m
 API — it has no compile-time dependency on microtak-server at runtime, and
 holds no state of its own.
 
+MicroTAK is not affiliated with or endorsed by the U.S. Department of Defense, the TAK Product Center, or any other organization.
+
 ## Why a separate tool, not a feature of microtak-server itself
 
 microtak-server's own design deliberately keeps its core lightweight — no
