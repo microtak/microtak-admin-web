@@ -7,5 +7,6 @@
 pub mod auth;
 pub mod client;
 pub mod config;
+pub mod csrf;
 pub mod pages;
 pub mod qr;

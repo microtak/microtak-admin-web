@@ -137,6 +137,10 @@ async fn post_form(router: &axum::Router, uri: &str, form: &str) -> (StatusCode,
                 .method("POST")
                 .uri(uri)
                 .header("content-type", "application/x-www-form-urlencoded")
+                // What a browser sends for a form submitted from the UI itself.
+                .header("host", "admin.local:8090")
+                .header("origin", "http://admin.local:8090")
+                .header("sec-fetch-site", "same-origin")
                 .body(Body::from(form.to_string()))
                 .unwrap(),
         )
@@ -296,4 +300,53 @@ async fn e2e_web_ui_manages_real_groups() {
     assert_eq!(status, StatusCode::SEE_OTHER);
     let (_, body) = get(&router, "/groups").await;
     assert!(!body.contains("<h2>Red"));
+}
+
+/// A POST with arbitrary extra headers, e.g. what a browser sends when a
+/// third-party page submits a form to this UI.
+async fn post_form_with(router: &axum::Router, uri: &str, form: &str, headers: &[(&str, &str)]) -> StatusCode {
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/x-www-form-urlencoded")
+        .header("host", "admin.local:8090");
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    router
+        .clone()
+        .oneshot(request.body(Body::from(form.to_string())).unwrap())
+        .await
+        .unwrap()
+        .status()
+}
+
+/// CSRF: the browser sends the UI's Basic Auth credentials with any form
+/// post, also one a malicious page makes it submit. Such posts are refused
+/// and change nothing on the server; posts from the UI itself work.
+#[tokio::test]
+async fn e2e_cross_site_form_posts_are_refused() {
+    let (router, _app, _creds_dir) = setup().await;
+    let cross_site: &[&[(&str, &str)]] = &[
+        &[("origin", "https://evil.example"), ("sec-fetch-site", "cross-site")],
+        &[("origin", "https://evil.example")],
+        &[("referer", "https://evil.example/page")],
+        &[("sec-fetch-site", "same-site"), ("origin", "http://other.admin.local:8090")],
+        &[], // no provenance at all
+    ];
+    for headers in cross_site {
+        let status = post_form_with(&router, "/tokens", "", headers).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "headers {headers:?}");
+    }
+    let (_, page) = get(&router, "/tokens").await;
+    assert!(!page.contains("<td><code>"), "nothing was minted: {page}");
+
+    for headers in [
+        &[("origin", "http://admin.local:8090")][..],
+        &[("referer", "http://admin.local:8090/tokens")][..],
+        &[("sec-fetch-site", "same-origin")][..],
+    ] {
+        let status = post_form_with(&router, "/tokens", "", headers).await;
+        assert_eq!(status, StatusCode::OK, "headers {headers:?}");
+    }
 }

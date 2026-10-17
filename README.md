@@ -113,6 +113,12 @@ that gate, not a finished access-control system. Run it behind your own
 network-level access control (VPN, a reverse proxy with real auth) in
 addition to, not instead of, this check for anything beyond a trusted LAN.
 
+Since browsers send Basic Auth credentials with any request to this
+origin, every state-changing request must come from this UI itself
+(`Sec-Fetch-Site: same-origin`, or an `Origin`/`Referer` matching the
+host) — a form that another site makes your browser submit is refused.
+Scripts should use microtak-admin-cli instead.
+
 ## Development
 
 ```sh

@@ -40,6 +40,7 @@ pub fn router(state: AppState) -> Router {
             "/missions/:name/roles/:uid/revoke",
             post(revoke_role_page),
         )
+        .layer(axum::middleware::from_fn(crate::csrf::require_same_origin))
         .with_state(state)
 }
 
@@ -59,6 +60,7 @@ fn layout(title: &str, body: Markup) -> Markup {
                     a href="/missions" { "Missions" }
                     " · "
                     a href="/groups" { "Groups" }
+
                 }
                 hr;
                 h1 { (title) }
