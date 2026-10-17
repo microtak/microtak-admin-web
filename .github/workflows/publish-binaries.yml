@@ -29,11 +29,20 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Each target builds natively on its own runner (no cross toolchain).
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
       TAG: ${{ inputs.tag_name }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      ARCHIVE: microtak-admin-web-${{ matrix.target }}.tar.gz
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,14 +75,19 @@ jobs:
 
       - name: Package
         working-directory: microtak-admin-web
-        run: |
-          cd target/release
-          tar czf microtak-admin-web-x86_64-unknown-linux-gnu.tar.gz microtak-admin-web
+        run: tar czf "$ARCHIVE" -C target/release microtak-admin-web
 
       # `gh` finds draft releases by tag (the REST "get release by tag"
       # endpoint, which some upload actions rely on, doesn't return drafts).
       - name: Upload to the draft release
-        run: gh release upload "$TAG" microtak-admin-web/target/release/microtak-admin-web-x86_64-unknown-linux-gnu.tar.gz --clobber
+        run: gh release upload "$TAG" "microtak-admin-web/$ARCHIVE" --clobber
 
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
       - name: Publish the release
-        run: gh release edit "$TAG" --draft=false --latest
+        run: gh release edit "${{ inputs.tag_name }}" --draft=false --latest
