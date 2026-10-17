@@ -15,7 +15,7 @@
 //!    microtak-admin-cli or the server's admin API directly.
 
 use axum::extract::Request;
-use axum::http::{header, HeaderMap, Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -41,7 +41,9 @@ fn comes_from_this_ui(headers: &HeaderMap) -> bool {
         return false;
     };
     match header(header::ORIGIN.as_str()).or_else(|| header(header::REFERER.as_str())) {
-        Some(source) => authority_of(source).is_some_and(|authority| authority.eq_ignore_ascii_case(host)),
+        Some(source) => {
+            authority_of(source).is_some_and(|authority| authority.eq_ignore_ascii_case(host))
+        }
         None => false,
     }
 }
@@ -67,9 +69,18 @@ mod tests {
 
     #[test]
     fn origin_must_match_host_including_port() {
-        assert!(comes_from_this_ui(&headers(&[("host", "a:8090"), ("origin", "http://a:8090")])));
-        assert!(!comes_from_this_ui(&headers(&[("host", "a:8090"), ("origin", "http://a:9999")])));
-        assert!(!comes_from_this_ui(&headers(&[("host", "a:8090"), ("origin", "null")])));
+        assert!(comes_from_this_ui(&headers(&[
+            ("host", "a:8090"),
+            ("origin", "http://a:8090")
+        ])));
+        assert!(!comes_from_this_ui(&headers(&[
+            ("host", "a:8090"),
+            ("origin", "http://a:9999")
+        ])));
+        assert!(!comes_from_this_ui(&headers(&[
+            ("host", "a:8090"),
+            ("origin", "null")
+        ])));
     }
 
     #[test]
@@ -83,8 +94,14 @@ mod tests {
 
     #[test]
     fn referer_is_the_fallback() {
-        assert!(comes_from_this_ui(&headers(&[("host", "a"), ("referer", "https://a/tokens?x=1")])));
-        assert!(!comes_from_this_ui(&headers(&[("host", "a"), ("referer", "https://a.evil/tokens")])));
+        assert!(comes_from_this_ui(&headers(&[
+            ("host", "a"),
+            ("referer", "https://a/tokens?x=1")
+        ])));
+        assert!(!comes_from_this_ui(&headers(&[
+            ("host", "a"),
+            ("referer", "https://a.evil/tokens")
+        ])));
     }
 
     #[test]

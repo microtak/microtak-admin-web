@@ -4,11 +4,11 @@
 
 use std::sync::Arc;
 
+use axum::Router;
 use axum::extract::{Form, Path, State};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use axum::Router;
-use maud::{html, Markup, DOCTYPE};
+use maud::{DOCTYPE, Markup, html};
 use serde::Deserialize;
 
 use crate::client::{ClientError, MicrotakClient};
@@ -33,15 +33,21 @@ pub fn router(state: AppState) -> Router {
         .route("/groups", get(list_groups_page).post(create_group_page))
         .route("/groups/:name/delete", post(delete_group_page))
         .route("/groups/:name/members", post(set_member_page))
-        .route("/groups/:name/members/:identity/remove", post(remove_member_page))
-        .route("/missions", get(list_missions_page))
-        .route("/missions/:name", get(mission_detail_page).post(assign_role_page))
         .route(
-            "/missions/:name/roles/:uid/revoke",
-            post(revoke_role_page),
+            "/groups/:name/members/:identity/remove",
+            post(remove_member_page),
         )
+        .route("/missions", get(list_missions_page))
+        .route(
+            "/missions/:name",
+            get(mission_detail_page).post(assign_role_page),
+        )
+        .route("/missions/:name/roles/:uid/revoke", post(revoke_role_page))
         .route("/devices", get(list_devices_page))
-        .route("/devices/certificates/:hash/revoke", post(revoke_certificate_page))
+        .route(
+            "/devices/certificates/:hash/revoke",
+            post(revoke_certificate_page),
+        )
         .route("/devices/:name/block", post(block_device_page))
         .route("/devices/:name/unblock", post(unblock_device_page))
         .layer(axum::middleware::from_fn(crate::csrf::require_same_origin))
@@ -169,7 +175,10 @@ fn status_text(token: &crate::client::EnrollmentToken) -> String {
     if token.revoked {
         "revoked".to_string()
     } else if token.used {
-        format!("used by {}", token.used_by_common_name.as_deref().unwrap_or("?"))
+        format!(
+            "used by {}",
+            token.used_by_common_name.as_deref().unwrap_or("?")
+        )
     } else {
         "unused".to_string()
     }
@@ -216,10 +225,7 @@ where
     let raw: Option<String> = Option::deserialize(deserializer)?;
     match raw.as_deref() {
         None | Some("") => Ok(None),
-        Some(value) => value
-            .parse()
-            .map(Some)
-            .map_err(serde::de::Error::custom),
+        Some(value) => value.parse().map(Some).map_err(serde::de::Error::custom),
     }
 }
 
@@ -231,7 +237,10 @@ where
     Ok(raw.filter(|s| !s.is_empty()))
 }
 
-async fn mint_token_page(State(state): State<AppState>, Form(form): Form<MintTokenForm>) -> Response {
+async fn mint_token_page(
+    State(state): State<AppState>,
+    Form(form): Form<MintTokenForm>,
+) -> Response {
     // Validate what the QR code needs before minting, so a bad config
     // doesn't leave an orphaned token behind.
     if let (Some(url), Some(_)) = (&state.enrollment_url, &form.common_name)
@@ -256,7 +265,8 @@ async fn mint_token_page(State(state): State<AppState>, Form(form): Form<MintTok
         Ok(token) => {
             let link = match (&state.enrollment_url, &form.common_name) {
                 (Some(url), Some(name)) => {
-                    EnrollmentLink::new(url, state.streaming_port, state.api_port, name, &token).ok()
+                    EnrollmentLink::new(url, state.streaming_port, state.api_port, name, &token)
+                        .ok()
                 }
                 _ => None,
             };
@@ -294,7 +304,9 @@ async fn revoke_token_page(State(state): State<AppState>, Path(token): Path<Stri
 
 async fn list_devices_page(State(state): State<AppState>) -> Response {
     match state.client.list_certificates().await {
-        Ok(certs) => Html(layout("Devices", render_certificates(&certs)).into_string()).into_response(),
+        Ok(certs) => {
+            Html(layout("Devices", render_certificates(&certs)).into_string()).into_response()
+        }
         Err(error) => error_response(&error),
     }
 }
@@ -347,7 +359,10 @@ fn render_certificates(certs: &[crate::client::TakCert]) -> Markup {
     }
 }
 
-async fn revoke_certificate_page(State(state): State<AppState>, Path(hash): Path<String>) -> Response {
+async fn revoke_certificate_page(
+    State(state): State<AppState>,
+    Path(hash): Path<String>,
+) -> Response {
     match state.client.revoke_certificate(&hash).await {
         Ok(()) => Redirect::to("/devices").into_response(),
         Err(error) => error_response(&error),
@@ -441,8 +456,15 @@ struct CreateGroupForm {
     description: Option<String>,
 }
 
-async fn create_group_page(State(state): State<AppState>, Form(form): Form<CreateGroupForm>) -> Response {
-    match state.client.create_group(form.name.trim(), form.description).await {
+async fn create_group_page(
+    State(state): State<AppState>,
+    Form(form): Form<CreateGroupForm>,
+) -> Response {
+    match state
+        .client
+        .create_group(form.name.trim(), form.description)
+        .await
+    {
         Ok(()) => Redirect::to("/groups").into_response(),
         Err(error) => error_response(&error),
     }
@@ -466,7 +488,11 @@ async fn set_member_page(
     Path(name): Path<String>,
     Form(form): Form<SetMemberForm>,
 ) -> Response {
-    match state.client.set_group_member(&name, form.identity.trim(), &form.direction).await {
+    match state
+        .client
+        .set_group_member(&name, form.identity.trim(), &form.direction)
+        .await
+    {
         Ok(()) => Redirect::to("/groups").into_response(),
         Err(error) => error_response(&error),
     }
@@ -516,7 +542,9 @@ fn urlencode(segment: &str) -> String {
     let mut out = String::new();
     for byte in segment.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
             _ => out.push_str(&format!("%{byte:02X}")),
         }
     }
@@ -573,7 +601,9 @@ async fn mission_detail_page(State(state): State<AppState>, Path(name): Path<Str
             };
             Html(layout(&format!("Mission: {name}"), body).into_string()).into_response()
         }
-        Ok(None) => Html(layout("Not Found", error_banner("no such mission")).into_string()).into_response(),
+        Ok(None) => {
+            Html(layout("Not Found", error_banner("no such mission")).into_string()).into_response()
+        }
         Err(error) => error_response(&error),
     }
 }
@@ -589,7 +619,11 @@ async fn assign_role_page(
     Path(name): Path<String>,
     Form(form): Form<AssignRoleForm>,
 ) -> Response {
-    match state.client.set_role(&name, &form.uid, Some(&form.role)).await {
+    match state
+        .client
+        .set_role(&name, &form.uid, Some(&form.role))
+        .await
+    {
         Ok(()) => Redirect::to(&format!("/missions/{}", urlencode(&name))).into_response(),
         Err(error) => error_response(&error),
     }

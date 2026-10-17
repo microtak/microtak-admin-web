@@ -23,7 +23,10 @@ static TEST_DIR_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 
 fn unique_temp_dir(label: &str) -> std::path::PathBuf {
     let n = TEST_DIR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!("microtak-admin-web-e2e-{label}-{}-{n}", std::process::id()))
+    std::env::temp_dir().join(format!(
+        "microtak-admin-web-e2e-{label}-{}-{n}",
+        std::process::id()
+    ))
 }
 
 async fn enroll(base_url: &str, common_name: &str, token: &str) -> (String, rcgen::KeyPair) {
@@ -37,7 +40,9 @@ async fn enroll(base_url: &str, common_name: &str, token: &str) -> (String, rcge
         .build()
         .unwrap();
     let response = client
-        .post(format!("{base_url}/Marti/api/tls/signClient/v2?token={token}"))
+        .post(format!(
+            "{base_url}/Marti/api/tls/signClient/v2?token={token}"
+        ))
         .header("Content-Type", "application/octet-stream")
         .body(csr_pem)
         .send()
@@ -59,7 +64,11 @@ async fn enroll(base_url: &str, common_name: &str, token: &str) -> (String, rcge
 /// `src/bootstrap.rs`; the admin CN can't be enrolled any other way) --
 /// and a `microtak-admin-web` router pointed at it with that admin's real
 /// cert.
-async fn setup() -> (axum::Router, Arc<microtak_server::missions::MissionStore>, std::path::PathBuf) {
+async fn setup() -> (
+    axum::Router,
+    Arc<microtak_server::missions::MissionStore>,
+    std::path::PathBuf,
+) {
     let (router, server, creds_dir) = setup_full().await;
     (router, server.missions, creds_dir)
 }
@@ -201,7 +210,12 @@ async fn e2e_web_ui_mints_lists_and_revokes_a_real_token() {
 
     // Without a device name: a token, but no QR code (it'd have no
     // username to carry).
-    let (status, body) = post_form(&router, "/tokens", "common_name=&expires_in_secs=&note=unbound").await;
+    let (status, body) = post_form(
+        &router,
+        "/tokens",
+        "common_name=&expires_in_secs=&note=unbound",
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("Token minted"));
     assert!(!body.contains("<svg"), "no QR code without a device name");
@@ -216,18 +230,28 @@ async fn e2e_web_ui_mints_lists_and_revokes_a_real_token() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("<svg"), "expected a real inline QR SVG");
-    let link_start = body.find("tak://com.atakmap.app/enroll?").expect("a tak:// enrollment link");
+    let link_start = body
+        .find("tak://com.atakmap.app/enroll?")
+        .expect("a tak:// enrollment link");
     let link = &body[link_start..body[link_start..].find('"').unwrap() + link_start];
     assert!(
-        link.starts_with("tak://com.atakmap.app/enroll?host=192.168.1.10&amp;username=phone-1&amp;token="),
+        link.starts_with(
+            "tak://com.atakmap.app/enroll?host=192.168.1.10&amp;username=phone-1&amp;token="
+        ),
         "{link}"
     );
-    assert!(!link.contains("enrollmentport="), "default port 8446 is left out: {link}");
+    assert!(
+        !link.contains("enrollmentport="),
+        "default port 8446 is left out: {link}"
+    );
 
     let (status, body) = get(&router, "/tokens").await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("for test device"));
-    assert!(body.contains("<td>phone-1</td>"), "the list shows the binding");
+    assert!(
+        body.contains("<td>phone-1</td>"),
+        "the list shows the binding"
+    );
     assert!(body.contains("Revoke"));
 
     // Extract the token value from the raw href the list rendered so we
@@ -268,22 +292,45 @@ async fn e2e_web_ui_manages_real_mission_roles() {
         )
         .unwrap();
     missions
-        .subscribe(&mission.guid, "ANDROID-SECOND", "second-device", microtak_server::missions::Role::Subscriber, 2_000, |id| id.into())
+        .subscribe(
+            &mission.guid,
+            "ANDROID-SECOND",
+            "second-device",
+            microtak_server::missions::Role::Subscriber,
+            2_000,
+            |id| id.into(),
+        )
         .unwrap();
 
     let (status, body) = get(&router, "/missions").await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("Web UI Test"));
 
-    let (status, _) = post_form(&router, "/missions/Web%20UI%20Test", "uid=ANDROID-SECOND&role=MISSION_OWNER").await;
+    let (status, _) = post_form(
+        &router,
+        "/missions/Web%20UI%20Test",
+        "uid=ANDROID-SECOND&role=MISSION_OWNER",
+    )
+    .await;
     assert_eq!(status, StatusCode::SEE_OTHER);
     let (_, body) = get(&router, "/missions/Web%20UI%20Test").await;
-    assert!(body.contains("ANDROID-SECOND") && body.contains("MISSION_OWNER"), "{body}");
+    assert!(
+        body.contains("ANDROID-SECOND") && body.contains("MISSION_OWNER"),
+        "{body}"
+    );
 
-    let (status, _) = post_form(&router, "/missions/Web%20UI%20Test/roles/ANDROID-SECOND/revoke", "").await;
+    let (status, _) = post_form(
+        &router,
+        "/missions/Web%20UI%20Test/roles/ANDROID-SECOND/revoke",
+        "",
+    )
+    .await;
     assert_eq!(status, StatusCode::SEE_OTHER);
     let (_, body) = get(&router, "/missions/Web%20UI%20Test").await;
-    assert!(!body.contains("ANDROID-SECOND"), "the subscription is gone: {body}");
+    assert!(
+        !body.contains("ANDROID-SECOND"),
+        "the subscription is gone: {body}"
+    );
 }
 
 /// Group management through the real web UI against a real server: create
@@ -295,7 +342,12 @@ async fn e2e_web_ui_manages_real_groups() {
 
     let (status, _) = post_form(&router, "/groups", "name=Red&description=red+team").await;
     assert_eq!(status, StatusCode::SEE_OTHER);
-    let (status, _) = post_form(&router, "/groups/Red/members", "identity=phone-1&direction=OUT").await;
+    let (status, _) = post_form(
+        &router,
+        "/groups/Red/members",
+        "identity=phone-1&direction=OUT",
+    )
+    .await;
     assert_eq!(status, StatusCode::SEE_OTHER);
 
     let (status, body) = get(&router, "/groups").await;
@@ -305,7 +357,12 @@ async fn e2e_web_ui_manages_real_groups() {
     assert!(body.contains("<td>phone-1</td><td>out</td>"), "{body}");
 
     // A token carrying the group, and the token list showing it.
-    let (status, _) = post_form(&router, "/tokens", "common_name=phone-2&groups=Red&groups_in=&groups_out=&expires_in_secs=&note=").await;
+    let (status, _) = post_form(
+        &router,
+        "/tokens",
+        "common_name=phone-2&groups=Red&groups_in=&groups_out=&expires_in_secs=&note=",
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let (_, body) = get(&router, "/tokens").await;
     assert!(body.contains("<td>Red</td>"), "{body}");
@@ -325,7 +382,12 @@ async fn e2e_web_ui_manages_real_groups() {
 
 /// A POST with arbitrary extra headers, e.g. what a browser sends when a
 /// third-party page submits a form to this UI.
-async fn post_form_with(router: &axum::Router, uri: &str, form: &str, headers: &[(&str, &str)]) -> StatusCode {
+async fn post_form_with(
+    router: &axum::Router,
+    uri: &str,
+    form: &str,
+    headers: &[(&str, &str)],
+) -> StatusCode {
     let mut request = Request::builder()
         .method("POST")
         .uri(uri)
@@ -349,10 +411,16 @@ async fn post_form_with(router: &axum::Router, uri: &str, form: &str, headers: &
 async fn e2e_cross_site_form_posts_are_refused() {
     let (router, _app, _creds_dir) = setup().await;
     let cross_site: &[&[(&str, &str)]] = &[
-        &[("origin", "https://evil.example"), ("sec-fetch-site", "cross-site")],
+        &[
+            ("origin", "https://evil.example"),
+            ("sec-fetch-site", "cross-site"),
+        ],
         &[("origin", "https://evil.example")],
         &[("referer", "https://evil.example/page")],
-        &[("sec-fetch-site", "same-site"), ("origin", "http://other.admin.local:8090")],
+        &[
+            ("sec-fetch-site", "same-site"),
+            ("origin", "http://other.admin.local:8090"),
+        ],
         &[], // no provenance at all
     ];
     for headers in cross_site {
@@ -378,15 +446,25 @@ async fn e2e_cross_site_form_posts_are_refused() {
 #[tokio::test]
 async fn e2e_web_ui_revokes_certificates_and_blocks_identities() {
     let (router, app, _creds_dir) = setup_with_registry().await;
-    app.registry.enroll("field-phone", &app.device_cert_pem, 1).unwrap();
+    app.registry
+        .enroll("field-phone", &app.device_cert_pem, 1)
+        .unwrap();
     let hash = pki::fingerprint_sha256_colon_hex(&app.device_cert_pem).unwrap();
 
     let (status, page) = get(&router, "/devices").await;
     assert_eq!(status, StatusCode::OK);
-    assert!(page.contains("field-phone") && page.contains("valid"), "{page}");
+    assert!(
+        page.contains("field-phone") && page.contains("valid"),
+        "{page}"
+    );
 
     let encoded: String = hash.replace(':', "%3A");
-    let (status, _) = post_form(&router, &format!("/devices/certificates/{encoded}/revoke"), "").await;
+    let (status, _) = post_form(
+        &router,
+        &format!("/devices/certificates/{encoded}/revoke"),
+        "",
+    )
+    .await;
     assert!(status.is_success() || status.is_redirection(), "{status}");
     assert!(app.registry.is_cert_revoked(&hash));
     let (_, page) = get(&router, "/devices").await;

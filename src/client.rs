@@ -144,7 +144,6 @@ struct MintTokenResponse {
     token: String,
 }
 
-
 #[derive(Deserialize)]
 struct ApiErrorBody {
     error: String,
@@ -217,7 +216,10 @@ impl MicrotakClient {
     pub async fn list_tokens(&self) -> Result<Vec<EnrollmentToken>, ClientError> {
         let response = self
             .http
-            .get(format!("{}/Marti/api/admin/enrollmentTokens", self.base_url))
+            .get(format!(
+                "{}/Marti/api/admin/enrollmentTokens",
+                self.base_url
+            ))
             .send()
             .await?;
         let response = check_status(response).await?;
@@ -233,7 +235,10 @@ impl MicrotakClient {
     ) -> Result<String, ClientError> {
         let response = self
             .http
-            .post(format!("{}/Marti/api/admin/enrollmentTokens", self.base_url))
+            .post(format!(
+                "{}/Marti/api/admin/enrollmentTokens",
+                self.base_url
+            ))
             .json(&MintTokenRequest {
                 expires_in_secs,
                 note,
@@ -264,7 +269,10 @@ impl MicrotakClient {
     pub async fn list_missions(&self) -> Result<Vec<Mission>, ClientError> {
         let response = self
             .http
-            .get(format!("{}/Marti/api/missions?passwordProtected=true&defaultRole=true", self.base_url))
+            .get(format!(
+                "{}/Marti/api/missions?passwordProtected=true&defaultRole=true",
+                self.base_url
+            ))
             .send()
             .await?;
         let response = check_status(response).await?;
@@ -273,21 +281,36 @@ impl MicrotakClient {
     }
 
     /// The mission and its subscriptions; `None` if there is no such mission.
-    pub async fn get_mission(&self, name: &str) -> Result<Option<(Mission, Vec<Subscription>)>, ClientError> {
+    pub async fn get_mission(
+        &self,
+        name: &str,
+    ) -> Result<Option<(Mission, Vec<Subscription>)>, ClientError> {
         let response = self
             .http
-            .get(format!("{}/Marti/api/missions/{}", self.base_url, urlencoding_light(name)))
+            .get(format!(
+                "{}/Marti/api/missions/{}",
+                self.base_url,
+                urlencoding_light(name)
+            ))
             .send()
             .await?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND || response.status() == reqwest::StatusCode::GONE {
+        if response.status() == reqwest::StatusCode::NOT_FOUND
+            || response.status() == reqwest::StatusCode::GONE
+        {
             return Ok(None);
         }
         let response = check_status(response).await?;
         let envelope: Envelope<Vec<Mission>> = response.json().await?;
-        let Some(mission) = envelope.data.into_iter().next() else { return Ok(None) };
+        let Some(mission) = envelope.data.into_iter().next() else {
+            return Ok(None);
+        };
         let response = self
             .http
-            .get(format!("{}/Marti/api/missions/{}/subscriptions/roles", self.base_url, urlencoding_light(name)))
+            .get(format!(
+                "{}/Marti/api/missions/{}/subscriptions/roles",
+                self.base_url,
+                urlencoding_light(name)
+            ))
             .send()
             .await?;
         let response = check_status(response).await?;
@@ -297,7 +320,12 @@ impl MicrotakClient {
 
     /// The official `PUT /missions/{name}/role`: `role` for the client's
     /// subscription, or none to remove it.
-    pub async fn set_role(&self, mission: &str, client_uid: &str, role: Option<&str>) -> Result<(), ClientError> {
+    pub async fn set_role(
+        &self,
+        mission: &str,
+        client_uid: &str,
+        role: Option<&str>,
+    ) -> Result<(), ClientError> {
         let mut url = format!(
             "{}/Marti/api/missions/{}/role?clientUid={}",
             self.base_url,
@@ -322,7 +350,11 @@ impl MicrotakClient {
         Ok(response.json().await?)
     }
 
-    pub async fn create_group(&self, name: &str, description: Option<String>) -> Result<(), ClientError> {
+    pub async fn create_group(
+        &self,
+        name: &str,
+        description: Option<String>,
+    ) -> Result<(), ClientError> {
         let response = self
             .http
             .post(format!("{}/Marti/api/admin/groups", self.base_url))
@@ -361,8 +393,16 @@ impl MicrotakClient {
 
     /// Block (`true`) or unblock an identity.
     pub async fn set_device_blocked(&self, name: &str, blocked: bool) -> Result<(), ClientError> {
-        let url = format!("{}/Marti/api/admin/devices/{}/block", self.base_url, urlencoding_light(name));
-        let request = if blocked { self.http.put(url) } else { self.http.delete(url) };
+        let url = format!(
+            "{}/Marti/api/admin/devices/{}/block",
+            self.base_url,
+            urlencoding_light(name)
+        );
+        let request = if blocked {
+            self.http.put(url)
+        } else {
+            self.http.delete(url)
+        };
         check_status(request.send().await?).await?;
         Ok(())
     }
@@ -370,7 +410,11 @@ impl MicrotakClient {
     pub async fn delete_group(&self, name: &str) -> Result<(), ClientError> {
         let response = self
             .http
-            .delete(format!("{}/Marti/api/admin/groups/{}", self.base_url, urlencoding_light(name)))
+            .delete(format!(
+                "{}/Marti/api/admin/groups/{}",
+                self.base_url,
+                urlencoding_light(name)
+            ))
             .send()
             .await?;
         check_status(response).await?;
@@ -378,7 +422,12 @@ impl MicrotakClient {
     }
 
     /// `direction`: `IN`, `OUT` or `BOTH`.
-    pub async fn set_group_member(&self, group: &str, identity: &str, direction: &str) -> Result<(), ClientError> {
+    pub async fn set_group_member(
+        &self,
+        group: &str,
+        identity: &str,
+        direction: &str,
+    ) -> Result<(), ClientError> {
         let response = self
             .http
             .put(format!(
@@ -394,7 +443,11 @@ impl MicrotakClient {
         Ok(())
     }
 
-    pub async fn remove_group_member(&self, group: &str, identity: &str) -> Result<(), ClientError> {
+    pub async fn remove_group_member(
+        &self,
+        group: &str,
+        identity: &str,
+    ) -> Result<(), ClientError> {
         let response = self
             .http
             .delete(format!(
@@ -408,7 +461,6 @@ impl MicrotakClient {
         check_status(response).await?;
         Ok(())
     }
-
 }
 
 /// A row of the official `GET /Marti/api/certadmin/cert` (`TakCert`).

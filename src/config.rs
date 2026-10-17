@@ -49,7 +49,10 @@ impl Config {
                 .unwrap_or_else(|error| panic!("invalid MICROTAK_ADMIN_WEB_BIND: {error}")),
             web_password: require_env("MICROTAK_ADMIN_WEB_PASSWORD"),
             enrollment_url: std::env::var("MICROTAK_ADMIN_WEB_ENROLLMENT_URL").ok(),
-            streaming_port: port_env("MICROTAK_ADMIN_WEB_STREAMING_PORT", crate::qr::DEFAULT_STREAMING_PORT),
+            streaming_port: port_env(
+                "MICROTAK_ADMIN_WEB_STREAMING_PORT",
+                crate::qr::DEFAULT_STREAMING_PORT,
+            ),
             api_port: port_env("MICROTAK_ADMIN_WEB_API_PORT", crate::qr::DEFAULT_API_PORT),
         }
     }

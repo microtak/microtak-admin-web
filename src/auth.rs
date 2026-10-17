@@ -14,7 +14,7 @@
 //! proxy with real auth) in addition to, not instead of, this check.
 
 use axum::extract::Request;
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -35,7 +35,10 @@ pub async fn require_password(
         }
         _ => (
             StatusCode::UNAUTHORIZED,
-            [(header::WWW_AUTHENTICATE, "Basic realm=\"microtak-admin-web\"")],
+            [(
+                header::WWW_AUTHENTICATE,
+                "Basic realm=\"microtak-admin-web\"",
+            )],
             "authentication required",
         )
             .into_response(),

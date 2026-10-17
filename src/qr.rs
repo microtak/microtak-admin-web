@@ -11,8 +11,8 @@
 //! format as `microtak-admin-cli token mint --qr`.
 
 use maud::{PreEscaped, Render};
-use qrcode::render::svg;
 use qrcode::QrCode;
+use qrcode::render::svg;
 
 pub const DEFAULT_ENROLLMENT_PORT: u16 = 8446;
 pub const DEFAULT_STREAMING_PORT: u16 = 8089;
@@ -34,7 +34,9 @@ pub enum LinkError {
     NotHttps(String),
     #[error("the enrollment URL has no host or an invalid port: '{0}'")]
     Malformed(String),
-    #[error("IPv6 literals aren't supported in enrollment QR codes -- use a DNS name or IPv4 address")]
+    #[error(
+        "IPv6 literals aren't supported in enrollment QR codes -- use a DNS name or IPv4 address"
+    )]
     Ipv6Literal,
 }
 
@@ -143,7 +145,11 @@ mod tests {
 
     #[test]
     fn behind_a_proxy_the_enrollment_port_is_included() {
-        assert!(link("https://tak.example.com/").to_uri().ends_with("&enrollmentport=443"));
+        assert!(
+            link("https://tak.example.com/")
+                .to_uri()
+                .ends_with("&enrollmentport=443")
+        );
     }
 
     #[test]
