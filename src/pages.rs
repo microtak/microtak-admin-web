@@ -40,6 +40,10 @@ pub fn router(state: AppState) -> Router {
             "/missions/:name/roles/:uid/revoke",
             post(revoke_role_page),
         )
+        .route("/devices", get(list_devices_page))
+        .route("/devices/:name/revoke-cert", post(revoke_device_cert_page))
+        .route("/devices/:name/block", post(block_device_page))
+        .route("/devices/:name/unblock", post(unblock_device_page))
         .layer(axum::middleware::from_fn(crate::csrf::require_same_origin))
         .with_state(state)
 }
@@ -60,7 +64,8 @@ fn layout(title: &str, body: Markup) -> Markup {
                     a href="/missions" { "Missions" }
                     " · "
                     a href="/groups" { "Groups" }
-
+                    " · "
+                    a href="/devices" { "Devices" }
                 }
                 hr;
                 h1 { (title) }
@@ -279,6 +284,93 @@ async fn mint_token_page(State(state): State<AppState>, Form(form): Form<MintTok
 async fn revoke_token_page(State(state): State<AppState>, Path(token): Path<String>) -> Response {
     match state.client.revoke_token(&token).await {
         Ok(()) => Redirect::to("/tokens").into_response(),
+        Err(error) => error_response(&error),
+    }
+}
+
+// ---------------------------------------------------------------------
+// Devices: certificate revocation and identity blocks
+// ---------------------------------------------------------------------
+
+async fn list_devices_page(State(state): State<AppState>) -> Response {
+    match state.client.list_devices().await {
+        Ok(devices) => Html(layout("Devices", render_devices(&devices)).into_string()).into_response(),
+        Err(error) => error_response(&error),
+    }
+}
+
+fn device_status(device: &crate::client::DeviceInfo) -> &'static str {
+    if device.blocked {
+        "blocked"
+    } else if device.certificate_revoked {
+        "cert revoked"
+    } else {
+        "active"
+    }
+}
+
+fn render_devices(devices: &[crate::client::DeviceInfo]) -> Markup {
+    html! {
+        p {
+            strong { "Revoke certificate" } " for a lost or compromised device: that certificate stops working "
+            "immediately, live connection included; the owner can enroll a new device with their password "
+            "account. " strong { "Block" } " locks the identity out entirely (any certificate, no re-enrollment) "
+            "until unblocked."
+        }
+        @if devices.is_empty() {
+            p { "No enrolled devices." }
+        } @else {
+            table {
+                tr { th{"Name"} th{"Status"} th{"UID"} th{"Enrolled"} th{"Certificate"} th{} }
+                @for device in devices {
+                    @let path = urlencode(&device.common_name);
+                    tr {
+                        td { (device.common_name) }
+                        td class=(if device_status(device) == "active" { "" } else { "revoked" }) { (device_status(device)) }
+                        td { (device.uid.as_deref().unwrap_or("—")) }
+                        td { (device.enrolled_at) }
+                        td { code { (device.certificate_fingerprint.as_deref().map(short).unwrap_or_else(|| "—".to_string())) } }
+                        td {
+                            @if !device.certificate_revoked && !device.blocked {
+                                form class="inline" method="post" action=(format!("/devices/{path}/revoke-cert")) {
+                                    button type="submit" { "revoke certificate" }
+                                }
+                                " "
+                            }
+                            @if device.blocked {
+                                form class="inline" method="post" action=(format!("/devices/{path}/unblock")) {
+                                    button type="submit" { "unblock" }
+                                }
+                            } @else {
+                                form class="inline" method="post" action=(format!("/devices/{path}/block")) {
+                                    button type="submit" { "block" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn revoke_device_cert_page(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    match state.client.revoke_device_certificate(&name).await {
+        Ok(()) => Redirect::to("/devices").into_response(),
+        Err(error) => error_response(&error),
+    }
+}
+
+async fn block_device_page(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    match state.client.set_device_blocked(&name, true).await {
+        Ok(()) => Redirect::to("/devices").into_response(),
+        Err(error) => error_response(&error),
+    }
+}
+
+async fn unblock_device_page(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    match state.client.set_device_blocked(&name, false).await {
+        Ok(()) => Redirect::to("/devices").into_response(),
         Err(error) => error_response(&error),
     }
 }

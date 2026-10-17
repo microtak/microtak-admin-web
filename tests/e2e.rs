@@ -60,6 +60,24 @@ async fn enroll(base_url: &str, common_name: &str, token: &str) -> (String, rcge
 /// and a `microtak-admin-web` router pointed at it with that admin's real
 /// cert.
 async fn setup() -> (axum::Router, Arc<microtak_server::missions::MissionStore>, std::path::PathBuf) {
+    let (router, server, creds_dir) = setup_full().await;
+    (router, server.missions, creds_dir)
+}
+
+/// What the device tests need from the running server.
+struct Server {
+    missions: Arc<microtak_server::missions::MissionStore>,
+    registry: Arc<microtak_server::registry::DeviceRegistry>,
+    /// A real certificate for a test device (the registry only needs its
+    /// fingerprint, so any CA will do).
+    device_cert_pem: String,
+}
+
+async fn setup_with_registry() -> (axum::Router, Server, std::path::PathBuf) {
+    setup_full().await
+}
+
+async fn setup_full() -> (axum::Router, Server, std::path::PathBuf) {
     let creds_dir = unique_temp_dir("creds");
     std::fs::create_dir_all(&creds_dir).unwrap();
 
@@ -77,6 +95,7 @@ async fn setup() -> (axum::Router, Arc<microtak_server::missions::MissionStore>,
     let marti_api_addr = app.marti_api_addr().unwrap();
     let ca_cert_pem = app.ca_cert_pem.clone();
     let missions = app.missions.clone();
+    let registry = app.registry.clone();
     let bootstrap_path = app
         .bootstrap_token_path()
         .expect("a fresh server has a bootstrap token outstanding");
@@ -113,7 +132,21 @@ async fn setup() -> (axum::Router, Arc<microtak_server::missions::MissionStore>,
     };
     let router = pages::router(state);
 
-    (router, missions, creds_dir)
+    let device_ca = pki::CertificateAuthority::generate("Device Test CA").unwrap();
+    let (device_csr, _) = pki::build_csr("field-phone").unwrap();
+    let device_cert_pem = device_ca
+        .sign_csr(&device_csr, time::Duration::days(1))
+        .unwrap()
+        .cert_pem;
+    (
+        router,
+        Server {
+            missions,
+            registry,
+            device_cert_pem,
+        },
+        creds_dir,
+    )
 }
 
 async fn get(router: &axum::Router, uri: &str) -> (StatusCode, String) {
@@ -349,4 +382,31 @@ async fn e2e_cross_site_form_posts_are_refused() {
         let status = post_form_with(&router, "/tokens", "", headers).await;
         assert_eq!(status, StatusCode::OK, "headers {headers:?}");
     }
+}
+
+/// Devices page: list, revoke a certificate, block and unblock -- each
+/// reflected on the real server.
+#[tokio::test]
+async fn e2e_web_ui_revokes_certificates_and_blocks_identities() {
+    let (router, app, _creds_dir) = setup_with_registry().await;
+    app.registry.enroll("field-phone", &app.device_cert_pem, 1).unwrap();
+
+    let (status, page) = get(&router, "/devices").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("field-phone") && page.contains("active"), "{page}");
+
+    let (status, _) = post_form(&router, "/devices/field-phone/revoke-cert", "").await;
+    assert!(status.is_success() || status.is_redirection(), "{status}");
+    let fingerprint = pki::fingerprint_sha256_colon_hex(&app.device_cert_pem).unwrap();
+    assert!(app.registry.is_cert_revoked(&fingerprint));
+
+    let (status, _) = post_form(&router, "/devices/field-phone/block", "").await;
+    assert!(status.is_success() || status.is_redirection(), "{status}");
+    assert!(app.registry.is_revoked("field-phone"));
+    let (_, page) = get(&router, "/devices").await;
+    assert!(page.contains("blocked"), "{page}");
+
+    let (status, _) = post_form(&router, "/devices/field-phone/unblock", "").await;
+    assert!(status.is_success() || status.is_redirection(), "{status}");
+    assert!(!app.registry.is_revoked("field-phone"));
 }

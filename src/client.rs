@@ -305,6 +305,38 @@ impl MicrotakClient {
         Ok(())
     }
 
+    pub async fn list_devices(&self) -> Result<Vec<DeviceInfo>, ClientError> {
+        let response = self
+            .http
+            .get(format!("{}/Marti/api/admin/devices", self.base_url))
+            .send()
+            .await?;
+        Ok(check_status(response).await?.json().await?)
+    }
+
+    /// Revoke the device's current certificate (lost/compromised device).
+    pub async fn revoke_device_certificate(&self, name: &str) -> Result<(), ClientError> {
+        let response = self
+            .http
+            .post(format!(
+                "{}/Marti/api/admin/devices/{}/revokeCertificate",
+                self.base_url,
+                urlencoding_light(name)
+            ))
+            .send()
+            .await?;
+        check_status(response).await?;
+        Ok(())
+    }
+
+    /// Block (`true`) or unblock an identity.
+    pub async fn set_device_blocked(&self, name: &str, blocked: bool) -> Result<(), ClientError> {
+        let url = format!("{}/Marti/api/admin/devices/{}/block", self.base_url, urlencoding_light(name));
+        let request = if blocked { self.http.put(url) } else { self.http.delete(url) };
+        check_status(request.send().await?).await?;
+        Ok(())
+    }
+
     pub async fn delete_group(&self, name: &str) -> Result<(), ClientError> {
         let response = self
             .http
@@ -361,6 +393,18 @@ impl MicrotakClient {
         check_status(response).await?;
         Ok(())
     }
+}
+
+/// One entry of microtak-server's `GET /Marti/api/admin/devices`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceInfo {
+    pub common_name: String,
+    pub uid: Option<String>,
+    pub enrolled_at: i64,
+    pub blocked: bool,
+    pub certificate_fingerprint: Option<String>,
+    pub certificate_revoked: bool,
 }
 
 async fn check_status(response: reqwest::Response) -> Result<reqwest::Response, ClientError> {

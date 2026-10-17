@@ -1,8 +1,8 @@
 # microtak-admin-web
 
 A small, standalone web UI for managing a [microtak-server](https://github.com/microtak/microtak-server)
-instance: enrollment invite tokens (with QR codes) and mission role
-assignment. It's a thin client over microtak-server's existing mTLS admin
+instance: enrollment invite tokens (with QR codes), groups, mission roles
+and devices (certificate revocation, identity blocks). It's a thin client over microtak-server's existing mTLS admin
 API — it has no compile-time dependency on microtak-server at runtime, and
 holds no state of its own.
 
@@ -80,6 +80,10 @@ username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
   Assigning/revoking a role that would leave a mission with zero owners
   (microtak-server's own last-owner protection) surfaces as a real,
   readable error in the page, not a stack trace.
+- **`/devices`** — every enrolled identity with its status and certificate
+  fingerprint. "Revoke certificate" for a lost device (it stops working at
+  once, live connection included; the owner re-enrolls with their account),
+  "block"/"unblock" to lock an identity out entirely.
 
 ## QR code payload
 
