@@ -31,7 +31,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -56,6 +56,10 @@ jobs:
       - name: Test
         working-directory: microtak-admin-web
         run: cargo test --locked
+
+      - name: Format
+        working-directory: microtak-admin-web
+        run: cargo fmt --check
 
       - name: Clippy
         working-directory: microtak-admin-web

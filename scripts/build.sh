@@ -10,7 +10,7 @@ Usage: scripts/build.sh [options]
 
   -b, --build     Build only: cargo build --tests --locked
   -t, --test      Test only: cargo test --locked (includes tests/e2e.rs)
-  -c, --clippy    Clippy only: cargo clippy --all-targets --locked -- -D warnings
+  -c, --clippy    Lint only: cargo fmt --check, then cargo clippy --all-targets --locked -- -D warnings
       --release   Build/test in release mode instead of debug
   -h, --help      Show this help
 
@@ -67,6 +67,8 @@ if [ "$do_test" -eq 1 ]; then
 fi
 
 if [ "$do_clippy" -eq 1 ]; then
+  echo "==> cargo fmt --check"
+  cargo fmt --check
   echo "==> cargo clippy --all-targets --locked -- -D warnings"
   cargo clippy --all-targets --locked -- -D warnings
 fi
