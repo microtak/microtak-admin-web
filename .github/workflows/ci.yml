@@ -64,3 +64,59 @@ jobs:
       - name: Clippy
         working-directory: microtak-admin-web
         run: cargo clippy --all-targets --locked -- -D warnings
+
+  # Line/region coverage of the whole test suite (cargo-llvm-cov): the
+  # summary goes into the run's job summary, lcov.info into an artifact.
+  coverage:
+    name: Code coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: microtak-admin-web
+
+      - uses: actions/checkout@v4
+        with:
+          repository: microtak/microtak-server
+          path: microtak-server
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: microtak-admin-web
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov@0.6.21
+
+      - name: Sync the microtak-server path dependency
+        working-directory: microtak-admin-web
+        run: cargo update -p microtak-server
+
+      - name: Run the tests with coverage
+        working-directory: microtak-admin-web
+        run: cargo llvm-cov --locked --no-report
+
+      - name: Report
+        working-directory: microtak-admin-web
+        run: |
+          cargo llvm-cov report --ignore-filename-regex 'microtak-server/' --lcov --output-path lcov.info
+          {
+            echo '## Code coverage'
+            echo
+            echo '```'
+            cargo llvm-cov report --ignore-filename-regex 'microtak-server/' --summary-only
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload lcov.info
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: microtak-admin-web/lcov.info
