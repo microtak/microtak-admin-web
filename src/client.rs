@@ -305,23 +305,25 @@ impl MicrotakClient {
         Ok(())
     }
 
-    pub async fn list_devices(&self) -> Result<Vec<DeviceInfo>, ClientError> {
+    /// Every issued certificate (official `GET /Marti/api/certadmin/cert`).
+    pub async fn list_certificates(&self) -> Result<Vec<TakCert>, ClientError> {
         let response = self
             .http
-            .get(format!("{}/Marti/api/admin/devices", self.base_url))
+            .get(format!("{}/Marti/api/certadmin/cert", self.base_url))
             .send()
             .await?;
-        Ok(check_status(response).await?.json().await?)
+        let body: ApiEnvelope<Vec<TakCert>> = check_status(response).await?.json().await?;
+        Ok(body.data)
     }
 
-    /// Revoke the device's current certificate (lost/compromised device).
-    pub async fn revoke_device_certificate(&self, name: &str) -> Result<(), ClientError> {
+    /// Revoke one certificate by hash (official `DELETE /certadmin/cert/{hash}`).
+    pub async fn revoke_certificate(&self, hash: &str) -> Result<(), ClientError> {
         let response = self
             .http
-            .post(format!(
-                "{}/Marti/api/admin/devices/{}/revokeCertificate",
+            .delete(format!(
+                "{}/Marti/api/certadmin/cert/{}",
                 self.base_url,
-                urlencoding_light(name)
+                urlencoding_light(hash)
             ))
             .send()
             .await?;
@@ -395,16 +397,28 @@ impl MicrotakClient {
     }
 }
 
-/// One entry of microtak-server's `GET /Marti/api/admin/devices`.
+/// A row of the official `GET /Marti/api/certadmin/cert` (`TakCert`).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DeviceInfo {
-    pub common_name: String,
-    pub uid: Option<String>,
-    pub enrolled_at: i64,
-    pub blocked: bool,
-    pub certificate_fingerprint: Option<String>,
-    pub certificate_revoked: bool,
+pub struct TakCert {
+    pub id: i64,
+    pub hash: String,
+    #[serde(default)]
+    pub user_dn: String,
+    #[serde(default)]
+    pub client_uid: String,
+    #[serde(default)]
+    pub issuance_date: Option<String>,
+    #[serde(default)]
+    pub expiration_date: Option<String>,
+    #[serde(default)]
+    pub revocation_date: Option<String>,
+}
+
+/// The official response envelope; only `data` is used.
+#[derive(Debug, Deserialize)]
+struct ApiEnvelope<T> {
+    data: T,
 }
 
 async fn check_status(response: reqwest::Response) -> Result<reqwest::Response, ClientError> {

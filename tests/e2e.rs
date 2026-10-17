@@ -384,28 +384,29 @@ async fn e2e_cross_site_form_posts_are_refused() {
     }
 }
 
-/// Devices page: list, revoke a certificate, block and unblock -- each
-/// reflected on the real server.
+/// Devices page: lists the issued certificates (official certificate
+/// admin API), revokes one by hash, blocks and unblocks the identity --
+/// each reflected on the real server.
 #[tokio::test]
 async fn e2e_web_ui_revokes_certificates_and_blocks_identities() {
     let (router, app, _creds_dir) = setup_with_registry().await;
     app.registry.enroll("field-phone", &app.device_cert_pem, 1).unwrap();
+    let hash = pki::fingerprint_sha256_colon_hex(&app.device_cert_pem).unwrap();
 
     let (status, page) = get(&router, "/devices").await;
     assert_eq!(status, StatusCode::OK);
-    assert!(page.contains("field-phone") && page.contains("active"), "{page}");
+    assert!(page.contains("field-phone") && page.contains("valid"), "{page}");
 
-    let (status, _) = post_form(&router, "/devices/field-phone/revoke-cert", "").await;
+    let encoded: String = hash.replace(':', "%3A");
+    let (status, _) = post_form(&router, &format!("/devices/certificates/{encoded}/revoke"), "").await;
     assert!(status.is_success() || status.is_redirection(), "{status}");
-    let fingerprint = pki::fingerprint_sha256_colon_hex(&app.device_cert_pem).unwrap();
-    assert!(app.registry.is_cert_revoked(&fingerprint));
+    assert!(app.registry.is_cert_revoked(&hash));
+    let (_, page) = get(&router, "/devices").await;
+    assert!(page.contains("revoked"), "{page}");
 
     let (status, _) = post_form(&router, "/devices/field-phone/block", "").await;
     assert!(status.is_success() || status.is_redirection(), "{status}");
     assert!(app.registry.is_revoked("field-phone"));
-    let (_, page) = get(&router, "/devices").await;
-    assert!(page.contains("blocked"), "{page}");
-
     let (status, _) = post_form(&router, "/devices/field-phone/unblock", "").await;
     assert!(status.is_success() || status.is_redirection(), "{status}");
     assert!(!app.registry.is_revoked("field-phone"));

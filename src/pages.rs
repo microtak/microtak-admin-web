@@ -41,7 +41,7 @@ pub fn router(state: AppState) -> Router {
             post(revoke_role_page),
         )
         .route("/devices", get(list_devices_page))
-        .route("/devices/:name/revoke-cert", post(revoke_device_cert_page))
+        .route("/devices/certificates/:hash/revoke", post(revoke_certificate_page))
         .route("/devices/:name/block", post(block_device_page))
         .route("/devices/:name/unblock", post(unblock_device_page))
         .layer(axum::middleware::from_fn(crate::csrf::require_same_origin))
@@ -293,58 +293,51 @@ async fn revoke_token_page(State(state): State<AppState>, Path(token): Path<Stri
 // ---------------------------------------------------------------------
 
 async fn list_devices_page(State(state): State<AppState>) -> Response {
-    match state.client.list_devices().await {
-        Ok(devices) => Html(layout("Devices", render_devices(&devices)).into_string()).into_response(),
+    match state.client.list_certificates().await {
+        Ok(certs) => Html(layout("Devices", render_certificates(&certs)).into_string()).into_response(),
         Err(error) => error_response(&error),
     }
 }
 
-fn device_status(device: &crate::client::DeviceInfo) -> &'static str {
-    if device.blocked {
-        "blocked"
-    } else if device.certificate_revoked {
-        "cert revoked"
-    } else {
-        "active"
-    }
-}
-
-fn render_devices(devices: &[crate::client::DeviceInfo]) -> Markup {
+fn render_certificates(certs: &[crate::client::TakCert]) -> Markup {
     html! {
         p {
-            strong { "Revoke certificate" } " for a lost or compromised device: that certificate stops working "
-            "immediately, live connection included; the owner can enroll a new device with their password "
-            "account. " strong { "Block" } " locks the identity out entirely (any certificate, no re-enrollment) "
-            "until unblocked."
+            "Every issued certificate (the official TAK Server certificate admin API). "
+            strong { "Revoke" } " a lost or compromised device's certificate: it stops working immediately, live "
+            "connection included; the owner can enroll a new device with their password account. "
+            strong { "Block" } " (MicroTAK extension) locks an identity out entirely -- any certificate, no "
+            "re-enrollment -- until unblocked."
         }
-        @if devices.is_empty() {
-            p { "No enrolled devices." }
+        @if certs.is_empty() {
+            p { "No issued certificates." }
         } @else {
             table {
-                tr { th{"Name"} th{"Status"} th{"UID"} th{"Enrolled"} th{"Certificate"} th{} }
-                @for device in devices {
-                    @let path = urlencode(&device.common_name);
+                tr { th{"ID"} th{"User"} th{"Status"} th{"Client UID"} th{"Issued"} th{"Expires"} th{"Certificate"} th{} }
+                @for cert in certs {
+                    @let user = urlencode(&cert.user_dn);
                     tr {
-                        td { (device.common_name) }
-                        td class=(if device_status(device) == "active" { "" } else { "revoked" }) { (device_status(device)) }
-                        td { (device.uid.as_deref().unwrap_or("—")) }
-                        td { (device.enrolled_at) }
-                        td { code { (device.certificate_fingerprint.as_deref().map(short).unwrap_or_else(|| "—".to_string())) } }
+                        td { (cert.id) }
+                        td { (cert.user_dn) }
+                        td class=(if cert.revocation_date.is_some() { "revoked" } else { "" }) {
+                            (if cert.revocation_date.is_some() { "revoked" } else { "valid" })
+                        }
+                        td { (if cert.client_uid.is_empty() { "—" } else { cert.client_uid.as_str() }) }
+                        td { (cert.issuance_date.as_deref().unwrap_or("—")) }
+                        td { (cert.expiration_date.as_deref().unwrap_or("—")) }
+                        td { code { (short(&cert.hash)) } }
                         td {
-                            @if !device.certificate_revoked && !device.blocked {
-                                form class="inline" method="post" action=(format!("/devices/{path}/revoke-cert")) {
-                                    button type="submit" { "revoke certificate" }
+                            @if cert.revocation_date.is_none() {
+                                form class="inline" method="post" action=(format!("/devices/certificates/{}/revoke", urlencode(&cert.hash))) {
+                                    button type="submit" { "revoke" }
                                 }
                                 " "
                             }
-                            @if device.blocked {
-                                form class="inline" method="post" action=(format!("/devices/{path}/unblock")) {
-                                    button type="submit" { "unblock" }
-                                }
-                            } @else {
-                                form class="inline" method="post" action=(format!("/devices/{path}/block")) {
-                                    button type="submit" { "block" }
-                                }
+                            form class="inline" method="post" action=(format!("/devices/{user}/block")) {
+                                button type="submit" { "block user" }
+                            }
+                            " "
+                            form class="inline" method="post" action=(format!("/devices/{user}/unblock")) {
+                                button type="submit" { "unblock" }
                             }
                         }
                     }
@@ -354,8 +347,8 @@ fn render_devices(devices: &[crate::client::DeviceInfo]) -> Markup {
     }
 }
 
-async fn revoke_device_cert_page(State(state): State<AppState>, Path(name): Path<String>) -> Response {
-    match state.client.revoke_device_certificate(&name).await {
+async fn revoke_certificate_page(State(state): State<AppState>, Path(hash): Path<String>) -> Response {
+    match state.client.revoke_certificate(&hash).await {
         Ok(()) => Redirect::to("/devices").into_response(),
         Err(error) => error_response(&error),
     }

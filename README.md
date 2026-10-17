@@ -80,10 +80,12 @@ username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
   Assigning/revoking a role that would leave a mission with zero owners
   (microtak-server's own last-owner protection) surfaces as a real,
   readable error in the page, not a stack trace.
-- **`/devices`** — every enrolled identity with its status and certificate
-  fingerprint. "Revoke certificate" for a lost device (it stops working at
-  once, live connection included; the owner re-enrolls with their account),
-  "block"/"unblock" to lock an identity out entirely.
+- **`/devices`** — every issued certificate from the official TAK Server
+  certificate admin API (id, user, status, client uid, dates, hash).
+  "revoke" for a lost device's certificate (it stops working at once, live
+  connection included; the owner re-enrolls with their account),
+  "block user"/"unblock" to lock an identity out entirely (MicroTAK
+  extension).
 
 ## QR code payload
 
