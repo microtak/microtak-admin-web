@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/microtak/microtak-admin-web/compare/v0.5.0...v0.5.1) (2026-10-18)
+
+
+### Documentation
+
+* code coverage in the README ([f545a69](https://github.com/microtak/microtak-admin-web/commit/f545a69c72835dac1a87b5820c6aa1074cf83f0e))
+* when mission roles can be set ([2be3a42](https://github.com/microtak/microtak-admin-web/commit/2be3a42a94b146dd737851d5da8d143477d089ad))
+
 ## [0.5.0](https://github.com/microtak/microtak-admin-web/compare/v0.4.0...v0.5.0) (2026-10-17)
 
 
