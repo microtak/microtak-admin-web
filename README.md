@@ -80,7 +80,9 @@ username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
   roles (`MISSION_OWNER`, `MISSION_SUBSCRIBER`,
   `MISSION_READONLY_SUBSCRIBER`) through the official Mission API. Errors
   from the server (e.g. a caller who isn't the mission's owner) show up as
-  a readable message in the page, not a stack trace.
+  a readable message in the page, not a stack trace. As on the official
+  server, roles need a mission created with a default role, and on a
+  mission without a password no one can get less than its default role.
 - **`/devices`** — every issued certificate from the official TAK Server
   certificate admin API (id, user, status, client uid, dates, hash).
   "revoke" for a lost device's certificate (it stops working at once, live
