@@ -152,6 +152,22 @@ crate at all) and drives this tool's real router against it end to end.
 checkout is present first, with a clear error if it isn't; see
 `scripts/build.sh --help`.
 
+### Styling
+
+The UI is styled with [Tailwind CSS](https://tailwindcss.com), compiled
+**ahead of time** into a committed bundle (`assets/app.css`) that `pages.rs`
+embeds with `include_str!` and inlines into every page. The runtime pulls in
+no CDN and runs no build step — the admin UI works offline on the field
+tablet. Regenerate the bundle after changing markup classes (class names live
+in the `maud` string literals, which `tailwind.config.js` scans):
+
+```sh
+tailwindcss -c tailwind.config.js -i assets/tailwind.css -o assets/app.css --minify
+# standalone CLI, or: npx tailwindcss …
+```
+
+Commit the regenerated `assets/app.css` alongside the markup change.
+
 ### Coverage
 
 ```sh
@@ -182,6 +198,10 @@ src/
   pages.rs     — all HTML routes/handlers (maud templates, plain HTML forms)
   auth.rs      — HTTP Basic Auth gate (see "Auth" above)
   qr.rs        — enrollment-token QR code rendering
+assets/
+  tailwind.css — Tailwind input (@tailwind layers + component styles)
+  app.css      — generated, committed bundle embedded into the binary
+tailwind.config.js — scans src/**/*.rs for class names
 tests/
   e2e.rs       — end-to-end suite against a real microtak-server App
 ```

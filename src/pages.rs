@@ -1,6 +1,9 @@
 //! All HTML pages: server-rendered with `maud`, forms submit as plain
-//! `application/x-www-form-urlencoded` POSTs -- no client-side JS
-//! framework, no build step, matching this project's lightweight ethos.
+//! `application/x-www-form-urlencoded` POSTs -- no client-side JS framework.
+//! Styling is Tailwind, compiled ahead of time into a committed bundle
+//! (`assets/app.css`) that is embedded in the binary and inlined into every
+//! page, so the runtime stays build-free, dependency-free and offline (no
+//! CDN) -- important for the field tablet. See `CSS` below to regenerate.
 
 use std::sync::Arc;
 
@@ -57,40 +60,42 @@ pub fn router(state: AppState) -> Router {
 fn layout(title: &str, body: Markup) -> Markup {
     html! {
         (DOCTYPE)
-        html {
+        html lang="en" {
             head {
                 meta charset="utf-8";
-                title { "microtak-admin-web — " (title) }
+                meta name="viewport" content="width=device-width, initial-scale=1";
+                title { "MicroTAK — " (title) }
                 style { (maud::PreEscaped(CSS)) }
             }
-            body {
-                nav {
-                    a href="/tokens" { "Enrollment Tokens" }
-                    " · "
-                    a href="/missions" { "Missions" }
-                    " · "
-                    a href="/groups" { "Groups" }
-                    " · "
-                    a href="/devices" { "Devices" }
+            body class="min-h-screen bg-slate-100 font-sans text-slate-800 antialiased" {
+                header class="bg-slate-900 text-slate-100 shadow-md" {
+                    div class="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3" {
+                        span class="h-2.5 w-2.5 rounded-full bg-emerald-400" {}
+                        span class="text-lg font-semibold tracking-tight" { "MicroTAK" }
+                        span class="hidden text-sm text-slate-400 sm:inline" { "admin" }
+                        nav class="ml-auto flex flex-wrap gap-1" {
+                            a class="nav-link" href="/tokens" { "Tokens" }
+                            a class="nav-link" href="/missions" { "Missions" }
+                            a class="nav-link" href="/groups" { "Groups" }
+                            a class="nav-link" href="/devices" { "Devices" }
+                        }
+                    }
                 }
-                hr;
-                h1 { (title) }
-                (body)
+                main class="mx-auto max-w-5xl px-4 py-8" {
+                    h1 class="mb-6 text-2xl font-bold tracking-tight text-slate-900" { (title) }
+                    (body)
+                }
             }
         }
     }
 }
 
-// Kept tiny and inline rather than a separate static asset, consistent
-// with "no build step."
-const CSS: &str = "body{font-family:sans-serif;max-width:860px;margin:2rem auto;padding:0 1rem;color:#111}\
-    table{border-collapse:collapse;width:100%;margin:1rem 0}\
-    th,td{border:1px solid #ccc;padding:0.4rem 0.6rem;text-align:left;font-size:0.9rem}\
-    .error{background:#fee;border:1px solid #c33;padding:0.6rem;margin:1rem 0}\
-    .revoked,.used{color:#888}\
-    form.inline{display:inline}\
-    fieldset{margin:1.5rem 0}\
-    code{background:#f2f2f2;padding:0.1rem 0.3rem}";
+// Tailwind-generated bundle, embedded so the admin UI needs no CDN and works
+// offline on the field tablet. Regenerate after changing markup classes:
+//   tailwindcss -c tailwind.config.js -i assets/tailwind.css -o assets/app.css --minify
+// (standalone CLI or `npx tailwindcss`). The output is committed; the runtime
+// still has no build step.
+const CSS: &str = include_str!("../assets/app.css");
 
 fn error_banner(message: &str) -> Markup {
     html! { div class="error" { (message) } }
@@ -166,7 +171,7 @@ fn render_tokens_list(
                     td {
                         @if !token.used && !token.revoked {
                             form class="inline" method="post" action=(format!("/tokens/{}/revoke", token.token)) {
-                                button type="submit" { "Revoke" }
+                                button type="submit" class="danger" { "Revoke" }
                             }
                         }
                     }
@@ -355,12 +360,12 @@ fn render_certificates(certs: &[crate::client::TakCert]) -> Markup {
                         td {
                             @if cert.revocation_date.is_none() {
                                 form class="inline" method="post" action=(format!("/devices/certificates/{}/revoke", urlencode(&cert.hash))) {
-                                    button type="submit" { "revoke" }
+                                    button type="submit" class="danger" { "revoke" }
                                 }
                                 " "
                             }
                             form class="inline" method="post" action=(format!("/devices/{user}/block")) {
-                                button type="submit" { "block user" }
+                                button type="submit" class="danger" { "block user" }
                             }
                             " "
                             form class="inline" method="post" action=(format!("/devices/{user}/unblock")) {
@@ -438,7 +443,7 @@ fn render_groups(groups: &[crate::client::GroupInfo]) -> Markup {
                         td {
                             form class="inline" method="post"
                                 action=(format!("/groups/{}/members/{}/remove", urlencode(&group.name), urlencode(identity))) {
-                                button type="submit" { "Remove" }
+                                button type="submit" class="danger" { "Remove" }
                             }
                         }
                     }
@@ -457,7 +462,7 @@ fn render_groups(groups: &[crate::client::GroupInfo]) -> Markup {
             }
             @if group.name != "__ANON__" {
                 form class="inline" method="post" action=(format!("/groups/{}/delete", urlencode(&group.name))) {
-                    button type="submit" { "Delete group " (group.name) }
+                    button type="submit" class="danger" { "Delete group " (group.name) }
                 }
             }
         }
@@ -584,7 +589,7 @@ async fn mission_detail_page(State(state): State<AppState>, Path(name): Path<Str
                             td {
                                 @if roles_enabled {
                                     form class="inline" method="post" action=(format!("/missions/{}/roles/{}/revoke", urlencode(&name), urlencode(&sub.client_uid))) {
-                                        button type="submit" { "Remove" }
+                                        button type="submit" class="danger" { "Remove" }
                                     }
                                 }
                             }
