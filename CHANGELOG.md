@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/microtak/microtak-admin-web/compare/v0.6.0...v0.7.0) (2026-11-01)
+
+
+### Features
+
+* **ui:** Tailwind-styled admin interface ([6ef8448](https://github.com/microtak/microtak-admin-web/commit/6ef84480e3a96b6aa68ee1f3a49c5606f84e9ef0))
+
 ## [0.6.0](https://github.com/microtak/microtak-admin-web/compare/v0.5.0...v0.6.0) (2026-11-01)
 
 
