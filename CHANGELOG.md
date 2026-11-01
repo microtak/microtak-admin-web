@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/microtak/microtak-admin-web/compare/v0.5.0...v0.6.0) (2026-11-01)
+
+
+### Features
+
+* **tokens:** pick enrollment groups from a dropdown of existing groups ([8330ceb](https://github.com/microtak/microtak-admin-web/commit/8330ceb4143a55ca4ae30a0f00392cebfc0e6307))
+
+
+### Documentation
+
+* code coverage in the README ([f545a69](https://github.com/microtak/microtak-admin-web/commit/f545a69c72835dac1a87b5820c6aa1074cf83f0e))
+* when mission roles can be set ([2be3a42](https://github.com/microtak/microtak-admin-web/commit/2be3a42a94b146dd737851d5da8d143477d089ad))
+
 ## [0.5.0](https://github.com/microtak/microtak-admin-web/compare/v0.4.0...v0.5.0) (2026-10-17)
 
 
