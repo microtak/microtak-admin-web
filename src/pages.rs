@@ -109,14 +109,21 @@ fn error_page(message: &str) -> Response {
 // ---------------------------------------------------------------------
 
 async fn list_tokens_page(State(state): State<AppState>) -> Response {
-    match state.client.list_tokens().await {
-        Ok(tokens) => Html(layout("Enrollment Tokens", render_tokens_list(&tokens)).into_string())
-            .into_response(),
-        Err(error) => error_response(&error),
-    }
+    let tokens = match state.client.list_tokens().await {
+        Ok(tokens) => tokens,
+        Err(error) => return error_response(&error),
+    };
+    // The group pickers are a convenience; if the groups can't be fetched we
+    // still render the form (the fields accept typed names too).
+    let groups = state.client.list_groups().await.unwrap_or_default();
+    Html(layout("Enrollment Tokens", render_tokens_list(&tokens, &groups)).into_string())
+        .into_response()
 }
 
-fn render_tokens_list(tokens: &[crate::client::EnrollmentToken]) -> Markup {
+fn render_tokens_list(
+    tokens: &[crate::client::EnrollmentToken],
+    groups: &[crate::client::GroupInfo],
+) -> Markup {
     html! {
         fieldset {
             legend { "Mint a new token" }
@@ -124,11 +131,19 @@ fn render_tokens_list(tokens: &[crate::client::EnrollmentToken]) -> Markup {
                 label { "Device name: " input type="text" name="common_name" placeholder="e.g. phone-1"; }
                 small { " — binds the token to this identity; needed for the QR code" }
                 br;
-                label { "Groups, both ways (optional): " input type="text" name="groups" placeholder="Red, Blue"; }
+                // Shared dropdown of the server's existing groups: each field
+                // below is a comma-separated list, and `list=` turns it into a
+                // pick-from-known-groups box (typing a new name still works).
+                datalist id="known-groups" {
+                    @for group in groups {
+                        option value=(group.name);
+                    }
+                }
+                label { "Groups, both ways (optional): " input type="text" name="groups" list="known-groups" placeholder="Red, Blue"; }
                 br;
-                label { "Send-only groups (IN, optional): " input type="text" name="groups_in"; }
+                label { "Send-only groups (IN, optional): " input type="text" name="groups_in" list="known-groups"; }
                 br;
-                label { "Receive-only groups (OUT, optional): " input type="text" name="groups_out"; }
+                label { "Receive-only groups (OUT, optional): " input type="text" name="groups_out" list="known-groups"; }
                 br;
                 label { "Expires in (seconds, optional): " input type="number" name="expires_in_secs"; }
                 br;
