@@ -80,6 +80,8 @@ struct Server {
     /// A real certificate for a test device (the registry only needs its
     /// fingerprint, so any CA will do).
     device_cert_pem: String,
+    /// `https://<addr>` of the server's enrollment endpoint.
+    enrollment_base_url: String,
 }
 
 async fn setup_with_registry() -> (axum::Router, Server, std::path::PathBuf) {
@@ -156,6 +158,7 @@ async fn setup_full() -> (axum::Router, Server, std::path::PathBuf) {
             missions,
             registry,
             device_cert_pem,
+            enrollment_base_url,
         },
         creds_dir,
     )
@@ -381,6 +384,91 @@ async fn e2e_web_ui_manages_real_groups() {
     assert_eq!(status, StatusCode::SEE_OTHER);
     let (_, body) = get(&router, "/groups").await;
     assert!(!body.contains("<h2>Red"));
+}
+
+/// Password accounts through the real web UI: create one with a chosen
+/// password and groups, one with a server-generated password, enroll a
+/// device with the first account's credentials (what its QR code makes a
+/// TAK client do), then revoke it and see enrollment refused.
+#[tokio::test]
+async fn e2e_web_ui_manages_real_password_accounts() {
+    let (router, server, _creds_dir) = setup_full().await;
+
+    let (status, body) = get(&router, "/users").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("No password accounts."), "{body}");
+
+    let (status, _) = post_form(&router, "/groups", "name=Red").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (status, body) = post_form(
+        &router,
+        "/users",
+        "username=alice&password=correct+horse&groups=Red&groups_in=&groups_out=",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("Account <strong>alice</strong> created"),
+        "{body}"
+    );
+    assert!(
+        !body.contains("Generated password"),
+        "a chosen password isn't echoed"
+    );
+    assert!(body.contains("<svg"), "expected a real inline QR SVG");
+    assert!(
+        body.contains("tak://com.atakmap.app/enroll?host=192.168.1.10&amp;username=alice&amp;token=correct%20horse"),
+        "{body}"
+    );
+
+    // No password: the server generates one, shown once.
+    let (status, body) = post_form(&router, "/users", "username=bob&password=").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Generated password"), "{body}");
+
+    // Errors from the server surface readably.
+    let (status, body) = post_form(&router, "/users", "username=alice").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("user already exists"), "{body}");
+    let (_, body) = post_form(&router, "/users", "username=carol&groups=Nope").await;
+    assert!(body.contains("unknown group"), "{body}");
+
+    let (status, body) = get(&router, "/users").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("<td>alice</td><td>Red</td>"), "{body}");
+    assert!(body.contains("<td>bob</td><td>—</td>"), "{body}");
+    assert!(body.contains(r#"action="/users/alice/revoke""#), "{body}");
+
+    let enroll_as_alice = || async {
+        let (csr_pem, _key) = pki::build_csr("alice").unwrap();
+        reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .no_proxy()
+            .build()
+            .unwrap()
+            .post(format!(
+                "{}/Marti/api/tls/signClient/v2",
+                server.enrollment_base_url
+            ))
+            .basic_auth("alice", Some("correct horse"))
+            .header("Content-Type", "application/octet-stream")
+            .body(csr_pem)
+            .send()
+            .await
+            .unwrap()
+            .status()
+    };
+    assert_eq!(enroll_as_alice().await, 200);
+
+    let (status, _) = post_form(&router, "/users/alice/revoke", "").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (_, body) = get(&router, "/users").await;
+    assert!(
+        body.contains(r#"<td class="revoked">revoked</td>"#),
+        "{body}"
+    );
+    assert!(!body.contains(r#"action="/users/alice/revoke""#), "{body}");
+    assert_eq!(enroll_as_alice().await, 401);
 }
 
 /// A POST with arbitrary extra headers, e.g. what a browser sends when a

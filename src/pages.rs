@@ -36,6 +36,8 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(overview_page))
         .route("/tokens", get(list_tokens_page).post(mint_token_page))
         .route("/tokens/:token/revoke", post(revoke_token_page))
+        .route("/users", get(list_users_page).post(mint_user_page))
+        .route("/users/:username/revoke", post(revoke_user_page))
         .route("/groups", get(list_groups_page).post(create_group_page))
         .route("/groups/:name/delete", post(delete_group_page))
         .route("/groups/:name/members", post(set_member_page))
@@ -87,6 +89,7 @@ fn layout(title: &str, body: Markup) -> Markup {
                         nav class="ml-auto flex flex-wrap items-center gap-1" {
                             a class="nav-link" href="/" { "Overview" }
                             a class="nav-link" href="/tokens" { "Tokens" }
+                            a class="nav-link" href="/users" { "Users" }
                             a class="nav-link" href="/missions" { "Missions" }
                             a class="nav-link" href="/groups" { "Groups" }
                             a class="nav-link" href="/devices" { "Devices" }
@@ -366,6 +369,163 @@ async fn mint_token_page(
 async fn revoke_token_page(State(state): State<AppState>, Path(token): Path<String>) -> Response {
     match state.client.revoke_token(&token).await {
         Ok(()) => Redirect::to("/tokens").into_response(),
+        Err(error) => error_response(&error),
+    }
+}
+
+// ---------------------------------------------------------------------
+// Password accounts
+// ---------------------------------------------------------------------
+
+async fn list_users_page(State(state): State<AppState>) -> Response {
+    let users = match state.client.list_users().await {
+        Ok(users) => users,
+        Err(error) => return error_response(&error),
+    };
+    // As on the token page: the group pickers are only a convenience.
+    let groups = state.client.list_groups().await.unwrap_or_default();
+    Html(layout("Users", render_users(&users, &groups)).into_string()).into_response()
+}
+
+fn render_users(
+    users: &[crate::client::UserAccount],
+    groups: &[crate::client::GroupInfo],
+) -> Markup {
+    html! {
+        p {
+            "Password accounts, for clients that log in with a username and password (e.g. CloudTAK) "
+            "rather than an invite token. A device can also enroll with them, any number of times; "
+            "the username becomes its certificate name. " strong { "Revoke" } " stops the account "
+            "logging in or enrolling and also revokes its device's certificate."
+        }
+        fieldset {
+            legend { "Create an account" }
+            form method="post" action="/users" {
+                label { "Username: " input type="text" name="username" required autocomplete="off"; }
+                br;
+                label { "Password (optional): " input type="password" name="password" autocomplete="new-password"; }
+                small { " — leave empty to have the server generate one" }
+                br;
+                datalist id="known-groups" {
+                    @for group in groups {
+                        option value=(group.name);
+                    }
+                }
+                label { "Groups, both ways (optional): " input type="text" name="groups" list="known-groups" placeholder="Red, Blue"; }
+                br;
+                label { "Send-only groups (IN, optional): " input type="text" name="groups_in" list="known-groups"; }
+                br;
+                label { "Receive-only groups (OUT, optional): " input type="text" name="groups_out" list="known-groups"; }
+                br;
+                button type="submit" { "Create account" }
+            }
+        }
+        @if users.is_empty() {
+            p { "No password accounts." }
+        } @else {
+            table {
+                tr { th{"Username"} th{"Groups"} th{"Created"} th{"Status"} th{} }
+                @for user in users {
+                    tr {
+                        td { (user.username) }
+                        td { (crate::client::describe_grants(&user.groups)) }
+                        td { (user.created_at_unix) }
+                        @if user.revoked {
+                            td class="revoked" { "revoked" }
+                        } @else {
+                            td { "active" }
+                        }
+                        td {
+                            @if !user.revoked {
+                                form class="inline" method="post" action=(format!("/users/{}/revoke", urlencode(&user.username))) {
+                                    button type="submit" class="danger" { "Revoke" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct MintUserForm {
+    username: String,
+    #[serde(default, deserialize_with = "empty_string_as_none_str")]
+    password: Option<String>,
+    #[serde(default)]
+    groups: String,
+    #[serde(default)]
+    groups_in: String,
+    #[serde(default)]
+    groups_out: String,
+}
+
+async fn mint_user_page(State(state): State<AppState>, Form(form): Form<MintUserForm>) -> Response {
+    let username = form.username.trim();
+    if username.is_empty() {
+        return error_page("A username is required.");
+    }
+    // Same as for tokens: check the QR code can be built before creating
+    // anything, so a bad config doesn't leave an account half-handed-out.
+    if let Some(url) = &state.enrollment_url
+        && let Err(error) = EnrollmentLink::new(url, state.streaming_port, state.api_port, "x", "x")
+    {
+        return error_page(&format!("Can't build an enrollment QR code: {error}"));
+    }
+    let generated = form.password.is_none();
+    match state
+        .client
+        .mint_user(
+            username,
+            form.password,
+            crate::client::GroupLists {
+                groups: name_list(&form.groups),
+                groups_in: name_list(&form.groups_in),
+                groups_out: name_list(&form.groups_out),
+            },
+        )
+        .await
+    {
+        Ok(password) => {
+            // ATAK's enrollment link presents `token` as the password, so a
+            // password account gets the same QR code an invite token does.
+            let link = state.enrollment_url.as_ref().and_then(|url| {
+                EnrollmentLink::new(
+                    url,
+                    state.streaming_port,
+                    state.api_port,
+                    username,
+                    &password,
+                )
+                .ok()
+            });
+            let body = html! {
+                p { "Account " strong { (username) } " created." }
+                @if generated {
+                    p { "Generated password — this is the only time it is shown:" }
+                    p { code { (password) } }
+                }
+                @if let Some(link) = &link {
+                    p { "To enroll a TAK client (ATAK, OmniTAK, …) with this account, scan:" }
+                    div { (link) }
+                    p { "On the device itself, tap instead: " a href=(link.to_uri()) { "open in TAK client" } }
+                    p { small { "The code contains the password and, unlike an invite token, keeps working until the account is revoked — show it only to its user." } }
+                } @else {
+                    p { "No QR code: set MICROTAK_ADMIN_WEB_ENROLLMENT_URL (where devices reach the server) to get one." }
+                }
+                p { a href="/users" { "Back to users" } }
+            };
+            Html(layout("Account Created", body).into_string()).into_response()
+        }
+        Err(error) => error_response(&error),
+    }
+}
+
+async fn revoke_user_page(State(state): State<AppState>, Path(username): Path<String>) -> Response {
+    match state.client.revoke_user(&username).await {
+        Ok(()) => Redirect::to("/users").into_response(),
         Err(error) => error_response(&error),
     }
 }
