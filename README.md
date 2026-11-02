@@ -1,7 +1,7 @@
 # microtak-admin-web
 
 A small, standalone web UI for managing a [microtak-server](https://github.com/microtak/microtak-server)
-instance: enrollment invite tokens (with QR codes), groups, mission roles
+instance: enrollment invite tokens (with QR codes), password accounts, groups, mission roles
 and devices (certificate revocation, identity blocks). It's a thin client over microtak-server's existing mTLS admin
 API — it has no compile-time dependency on microtak-server at runtime, and
 holds no state of its own.
@@ -77,6 +77,14 @@ username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
   new one (device name, optional expiry and note), and get the standard TAK
   enrollment QR code for it — an inline SVG generated server-side, plus a
   tap-to-open `tak://` link for when the page is open on the device itself.
+- **`/users`** — password accounts, for clients that log in with a
+  username and password (e.g. CloudTAK) rather than an invite token: list
+  them (groups, status), create one (username, optional password — left
+  empty, the server generates one and it's shown once — and groups), and
+  revoke one (it can't log in or enroll any more, and its device's
+  certificate is revoked too). Creating one also shows the TAK enrollment
+  QR code for the account; unlike an invite token's it keeps working until
+  the account is revoked.
 - **`/groups`** — groups ("channels", as on the official TAK Server):
   create and delete groups, add members with a direction (**in** = may send
   into the group, **out** = receives from it, or both), remove members.

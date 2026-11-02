@@ -45,8 +45,18 @@ pub struct EnrollmentToken {
     pub revoked: bool,
 }
 
-/// Mirrors `microtak_server::missions::Mission` -- see the note on
-/// `EnrollmentToken` above.
+/// Mirrors `microtak_server::users::UserInfo` -- see the note on
+/// `EnrollmentToken` above. Carries no password material.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserAccount {
+    pub username: String,
+    pub created_at_unix: i64,
+    pub revoked: bool,
+    /// Groups a device enrolling with this account is added to.
+    #[serde(default)]
+    pub groups: Vec<GroupGrant>,
+}
+
 /// The official `ApiResponse` envelope around `data`.
 #[derive(Debug, Deserialize)]
 struct Envelope<T> {
@@ -168,6 +178,20 @@ struct MintTokenResponse {
     token: String,
 }
 
+#[derive(Serialize)]
+struct MintUserRequest<'a> {
+    username: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    password: Option<String>,
+    #[serde(flatten)]
+    groups: GroupLists,
+}
+
+#[derive(Deserialize)]
+struct MintUserResponse {
+    password: String,
+}
+
 #[derive(Deserialize)]
 struct ApiErrorBody {
     error: String,
@@ -282,6 +306,57 @@ impl MicrotakClient {
             .delete(format!(
                 "{}/Marti/api/admin/enrollmentTokens/{token}",
                 self.base_url
+            ))
+            .send()
+            .await?;
+        check_status(response).await?;
+        Ok(())
+    }
+
+    /// Password accounts (for clients that log in with username/password,
+    /// e.g. CloudTAK), revoked ones included.
+    pub async fn list_users(&self) -> Result<Vec<UserAccount>, ClientError> {
+        let response = self
+            .http
+            .get(format!("{}/Marti/api/admin/users", self.base_url))
+            .send()
+            .await?;
+        let response = check_status(response).await?;
+        Ok(response.json().await?)
+    }
+
+    /// Mint a password account. With no `password` the server generates
+    /// one; either way the password now in effect is returned.
+    pub async fn mint_user(
+        &self,
+        username: &str,
+        password: Option<String>,
+        groups: GroupLists,
+    ) -> Result<String, ClientError> {
+        let response = self
+            .http
+            .post(format!("{}/Marti/api/admin/users", self.base_url))
+            .json(&MintUserRequest {
+                username,
+                password,
+                groups,
+            })
+            .send()
+            .await?;
+        let response = check_status(response).await?;
+        let body: MintUserResponse = response.json().await?;
+        Ok(body.password)
+    }
+
+    /// Revoke a password account; the server also revokes its device's
+    /// certificate.
+    pub async fn revoke_user(&self, username: &str) -> Result<(), ClientError> {
+        let response = self
+            .http
+            .delete(format!(
+                "{}/Marti/api/admin/users/{}",
+                self.base_url,
+                urlencoding_light(username)
             ))
             .send()
             .await?;
