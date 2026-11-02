@@ -482,28 +482,38 @@ async fn e2e_web_ui_revokes_certificates_and_blocks_identities() {
 }
 
 #[tokio::test]
-async fn e2e_system_page_shows_real_server_metrics() {
-    // The System page scrapes the *real* running server's metrics endpoint
-    // (wired up in setup_full) and renders the "MicroTAK server" panel with
-    // the server process's own figures -- not a mock, the actual exposition.
+async fn e2e_overview_page_shows_real_server_metrics() {
+    // The Overview page (the default landing, "/") scrapes the *real* running
+    // server's metrics endpoint (wired up in setup_full) and renders the
+    // server process's own figures and CPU/RAM -- not a mock, the actual
+    // exposition.
     let (router, _server, creds_dir) = setup_full().await;
 
-    let (status, body) = get(&router, "/system").await;
+    let (status, body) = get(&router, "/").await;
     assert_eq!(status, StatusCode::OK);
-    // Host section is always there; the server panel appears only because a
-    // reachable metrics endpoint is configured.
     assert!(body.contains("MicroTAK server"), "server panel missing");
+    // Operational figures on top...
+    assert!(body.contains("Enrolled devices"), "figures grid missing");
+    // ...CPU and memory on the bottom.
     assert!(
         body.contains("Server memory (RSS)"),
         "server RSS card missing"
     );
     assert!(body.contains("Server CPU"), "server CPU card missing");
-    // Live operational figures from the real server (one admin enrolled).
-    assert!(body.contains("Enrolled devices"), "figures grid missing");
+    // Figures come before the resource cards (fields on top, CPU/RAM below).
+    assert!(
+        body.find("Enrolled devices") < body.find("Server CPU"),
+        "operational figures should render above the CPU/memory cards"
+    );
     assert!(
         !body.contains("unreachable right now"),
         "metrics endpoint should have been reachable"
     );
+
+    // The System page still carries the host's own resource usage.
+    let (status, body) = get(&router, "/system").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Disk (/)"), "host system stats missing");
 
     let _ = std::fs::remove_dir_all(&creds_dir);
 }

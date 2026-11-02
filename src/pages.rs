@@ -33,7 +33,7 @@ pub struct AppState {
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/", get(|| async { Redirect::to("/tokens") }))
+        .route("/", get(overview_page))
         .route("/tokens", get(list_tokens_page).post(mint_token_page))
         .route("/tokens/:token/revoke", post(revoke_token_page))
         .route("/groups", get(list_groups_page).post(create_group_page))
@@ -85,6 +85,7 @@ fn layout(title: &str, body: Markup) -> Markup {
                         span class="text-lg font-semibold tracking-tight" { "MicroTAK" }
                         span class="hidden text-sm text-slate-400 sm:inline" { "admin" }
                         nav class="ml-auto flex flex-wrap items-center gap-1" {
+                            a class="nav-link" href="/" { "Overview" }
                             a class="nav-link" href="/tokens" { "Tokens" }
                             a class="nav-link" href="/missions" { "Missions" }
                             a class="nav-link" href="/groups" { "Groups" }
@@ -514,56 +515,48 @@ async fn unblock_device_page(State(state): State<AppState>, Path(name): Path<Str
 }
 
 // ---------------------------------------------------------------------
-// System resource usage (this host)
+// Overview (default landing): the MicroTAK server's own live state
 // ---------------------------------------------------------------------
 
-async fn system_page(State(state): State<AppState>) -> Response {
+async fn overview_page(State(state): State<AppState>) -> Response {
+    // The server's CPU/RAM are shown as a share of the host, so gather the
+    // host stats too; the operational figures come from the server's own
+    // (private) metrics endpoint. A fetch failure is surfaced in the page,
+    // not treated as fatal.
     let stats = crate::system::SystemStats::gather();
-    // The server's own metrics, if its (private) metrics endpoint is wired
-    // up. A fetch failure is surfaced in the page, not treated as fatal.
     let server = match &state.metrics_url {
         Some(url) => Some(crate::server_metrics::fetch(url).await),
         None => None,
     };
-    Html(layout("System", render_system(&stats, server.as_ref())).into_string()).into_response()
+    Html(layout("Overview", render_overview(&stats, server.as_ref())).into_string()).into_response()
 }
 
-fn render_system(
+fn render_overview(
     stats: &crate::system::SystemStats,
     server: Option<&Result<crate::server_metrics::ServerMetrics, reqwest::Error>>,
 ) -> Markup {
-    use crate::system::human_bytes;
-    let cores = if stats.ncpu == 1 { "core" } else { "cores" };
     html! {
-        h2 class="mt-6 mb-2 text-lg font-semibold text-slate-800 dark:text-slate-100" { "Host" }
-        p class="text-sm text-slate-500 dark:text-slate-400" { "Resource usage of the field-HQ host (this tablet) — reload to refresh." }
-        (stat_card(
-            "CPU load",
-            &format!("{:.2} · {:.2} · {:.2}  (1·5·15 min, {} {cores})",
-                stats.load1, stats.load5, stats.load15, stats.ncpu),
-            stats.cpu_percent(),
-        ))
-        (stat_card(
-            "Memory",
-            &format!("{} / {} used",
-                human_bytes(stats.mem_used_kb().saturating_mul(1024)),
-                human_bytes(stats.mem_total_kb.saturating_mul(1024))),
-            stats.mem_percent(),
-        ))
-        (stat_card(
-            "Disk (/)",
-            &format!("{} / {} used", human_bytes(stats.disk_used()), human_bytes(stats.disk_total)),
-            stats.disk_percent(),
-        ))
-        @if let Some(result) = server {
-            (render_server_panel(stats, result))
+        @match server {
+            // Without the metrics endpoint there is nothing to show here --
+            // point the operator at the knob that turns it on.
+            None => {
+                p class="my-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300" {
+                    "The server metrics endpoint is not configured — set "
+                    code { "MICROTAK_ADMIN_WEB_METRICS_URL" }
+                    " (or the module's "
+                    code { "metricsUrl" }
+                    ") to show the server's live state here."
+                }
+            }
+            Some(result) => (render_server_panel(stats, result)),
         }
     }
 }
 
-/// The "MicroTAK server" panel: the server *process's* own CPU/RAM (not the
-/// host's) plus its live operational counters, scraped from its metrics
-/// endpoint. Only rendered when that endpoint is configured.
+/// The MicroTAK server's own live state: its operational figures (on top --
+/// what the server is doing right now), then the server *process's* own
+/// CPU/RAM as a share of the host (on the bottom), scraped from its metrics
+/// endpoint.
 fn render_server_panel(
     stats: &crate::system::SystemStats,
     result: &Result<crate::server_metrics::ServerMetrics, reqwest::Error>,
@@ -574,11 +567,10 @@ fn render_server_panel(
         Err(_) => None,
     };
     html! {
-        h2 class="mt-8 mb-2 text-lg font-semibold text-slate-800 dark:text-slate-100" {
-            "MicroTAK server"
-            @if let Some(v) = &version {
-                span class="ml-2 text-sm font-normal text-slate-400 dark:text-slate-500" { "v" (v) }
-            }
+        p class="text-sm text-slate-500 dark:text-slate-400" {
+            "Live state of the MicroTAK server"
+            @if let Some(v) = &version { " (v" (v) ")" }
+            " — reload to refresh."
         }
         @match result {
             Err(_) => {
@@ -587,6 +579,9 @@ fn render_server_panel(
                 }
             }
             Ok(m) => {
+                // Operational figures on top: what the server is doing now.
+                (server_figures(m))
+                // The server process's own resource use on the bottom.
                 // CPU: cores busy now as a fraction of all cores, matching the
                 // host card's 0-100 scale. Falls back to the cumulative counter.
                 @let cpu_detail = match m.cpu_cores_used {
@@ -606,9 +601,43 @@ fn render_server_panel(
                     &format!("{} of {} host RAM", human_bytes(m.resident_bytes as u64), human_bytes(host_bytes)),
                     rss_percent,
                 ))
-                (server_figures(m))
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------
+// System resource usage (this host)
+// ---------------------------------------------------------------------
+
+async fn system_page() -> Response {
+    let stats = crate::system::SystemStats::gather();
+    Html(layout("System", render_system(&stats)).into_string()).into_response()
+}
+
+fn render_system(stats: &crate::system::SystemStats) -> Markup {
+    use crate::system::human_bytes;
+    let cores = if stats.ncpu == 1 { "core" } else { "cores" };
+    html! {
+        p class="text-sm text-slate-500 dark:text-slate-400" { "Resource usage of the field-HQ host (this tablet) — reload to refresh." }
+        (stat_card(
+            "CPU load",
+            &format!("{:.2} · {:.2} · {:.2}  (1·5·15 min, {} {cores})",
+                stats.load1, stats.load5, stats.load15, stats.ncpu),
+            stats.cpu_percent(),
+        ))
+        (stat_card(
+            "Memory",
+            &format!("{} / {} used",
+                human_bytes(stats.mem_used_kb().saturating_mul(1024)),
+                human_bytes(stats.mem_total_kb.saturating_mul(1024))),
+            stats.mem_percent(),
+        ))
+        (stat_card(
+            "Disk (/)",
+            &format!("{} / {} used", human_bytes(stats.disk_used()), human_bytes(stats.disk_total)),
+            stats.disk_percent(),
+        ))
     }
 }
 
