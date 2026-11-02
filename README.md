@@ -63,6 +63,33 @@ Then open `http://127.0.0.1:8090/` (or whatever `MICROTAK_ADMIN_WEB_BIND`
 you set) in a browser — you'll be prompted for HTTP Basic Auth; any
 username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
 
+### Nix / NixOS
+
+The flake builds the binary (`nix build github:microtak/microtak-admin-web`,
+or `nix run` it with the environment above) and ships a NixOS module that
+runs it as a service:
+
+```nix
+{
+  inputs.microtak-admin-web.url = "github:microtak/microtak-admin-web";
+  # in the host's modules:
+  imports = [ microtak-admin-web.nixosModules.default ];
+  services.microtak-admin-web = {
+    enable = true;
+    serverUrl = "https://tak.example.org:8443";
+    enrollmentUrl = "https://192.168.1.10:8446";
+    bindAddress = "0.0.0.0:8090";            # default 127.0.0.1:8090
+    metricsUrl = "http://127.0.0.1:9090";    # optional, System page
+  };
+}
+```
+
+The service reads the admin credential (`admin.pem`, `admin.key`,
+`ca.pem`) from `credentialsDir` (default `/var/lib/microtak-admin`) via the
+group `group` (default `microtak`) -- put the files there, readable by that
+group, before starting it. On first start it generates the Basic-auth
+password into `web.env` there, with a readable copy in `web-password`.
+
 ## What it does
 
 - **`/`** — the **Overview** landing page: the MicroTAK server's own live
@@ -222,4 +249,5 @@ assets/
 tailwind.config.js — scans src/**/*.rs for class names
 tests/
   e2e.rs       — end-to-end suite against a real microtak-server App
+flake.nix      — Nix package + NixOS module (see "Nix / NixOS")
 ```
