@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0](https://github.com/microtak/microtak-admin-web/compare/v0.11.0...v0.12.0) (2026-11-02)
+
+
+### Features
+
+* **ui:** add a Users page for password accounts ([#16](https://github.com/microtak/microtak-admin-web/issues/16)) ([04cf224](https://github.com/microtak/microtak-admin-web/commit/04cf2240d5aa2b4f9f5d36f4c1e1fe3f8b96d57b))
+
+
+### Bug Fixes
+
+* **deps:** bump tokio, rustls-webpki, webpki-roots and ctutils ([#18](https://github.com/microtak/microtak-admin-web/issues/18)) ([9e1f9a8](https://github.com/microtak/microtak-admin-web/commit/9e1f9a81c9838b5ee237ced5dbd00044b9d3bf33))
+
 ## [0.11.0](https://github.com/microtak/microtak-admin-web/compare/v0.10.0...v0.11.0) (2026-11-02)
 
 
