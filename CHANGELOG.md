@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/microtak/microtak-admin-web/compare/v0.7.0...v0.8.0) (2026-11-02)
+
+
+### Features
+
+* **ui:** create missions, device presence, system stats, dark mode ([9ce17e5](https://github.com/microtak/microtak-admin-web/commit/9ce17e5f6bfde80e3c47f12d1325ebb42611ba43))
+
 ## [0.7.0](https://github.com/microtak/microtak-admin-web/compare/v0.6.0...v0.7.0) (2026-11-01)
 
 
