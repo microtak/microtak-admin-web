@@ -34,6 +34,7 @@ All via environment variables:
 | `MICROTAK_ADMIN_WEB_ENROLLMENT_URL` | no | Where devices reach microtak-server's enrollment endpoint (HTTPS only), e.g. `https://192.168.1.10:8446`, or `https://tak.example.com` behind a reverse proxy on 443 — needed for enrollment QR codes |
 | `MICROTAK_ADMIN_WEB_STREAMING_PORT` | no | Streaming (mTLS CoT) port devices connect to, default `8089` — added to the QR code only if different |
 | `MICROTAK_ADMIN_WEB_API_PORT` | no | Marti API port devices connect to, default `8443` — added to the QR code only if different |
+| `MICROTAK_ADMIN_WEB_METRICS_URL` | no | Base URL of microtak-server's (private) Prometheus metrics endpoint, e.g. `http://127.0.0.1:9090` — enables the Overview page's live server state. Keep it loopback-only / off the firewall |
 
 ### Bootstrapping the admin certificate
 
@@ -64,6 +65,13 @@ username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
 
 ## What it does
 
+- **`/`** — the **Overview** landing page: the MicroTAK server's own live
+  state, scraped from its (private) metrics endpoint
+  (`MICROTAK_ADMIN_WEB_METRICS_URL`). The operational figures (connected
+  clients, open connections, enrolled devices, missions/groups, CoT events
+  relayed, data stored) show on top, and the server process's own CPU and
+  memory (as a share of the host) on the bottom. Shown only when that
+  endpoint is configured.
 - **`/tokens`** — list existing enrollment invite tokens (status:
   unused/used/expired/revoked, device it's bound to, note, expiry), mint a
   new one (device name, optional expiry and note), and get the standard TAK
@@ -89,6 +97,8 @@ username, the password must match `MICROTAK_ADMIN_WEB_PASSWORD`.
   connection included; the owner re-enrolls with their account),
   "block user"/"unblock" to lock an identity out entirely (MicroTAK
   extension).
+- **`/system`** — the host's own resource usage (CPU load, memory, root
+  disk) for the box this UI and the server run on — the field tablet.
 
 ## QR code payload
 
