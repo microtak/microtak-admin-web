@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/microtak/microtak-admin-web/compare/v0.9.0...v0.10.0) (2026-11-02)
+
+
+### Features
+
+* **ui:** add an Overview landing page with the server's live state ([cd98137](https://github.com/microtak/microtak-admin-web/commit/cd9813710cc7f18fc426d490e01028eabebb7264))
+
+
+### Documentation
+
+* **readme:** document the Overview page, /system, and the metrics URL ([d8f945e](https://github.com/microtak/microtak-admin-web/commit/d8f945ebec24ab1392eae242405b935fd60756a6))
+
 ## [0.9.0](https://github.com/microtak/microtak-admin-web/compare/v0.8.0...v0.9.0) (2026-11-02)
 
 
