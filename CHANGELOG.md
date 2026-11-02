@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/microtak/microtak-admin-web/compare/v0.8.0...v0.9.0) (2026-11-02)
+
+
+### Features
+
+* **ui:** show microtak-server process metrics on the System page ([07f87ea](https://github.com/microtak/microtak-admin-web/commit/07f87ea0e9a76b0e72f496ea288d941cf7286ae7))
+
 ## [0.8.0](https://github.com/microtak/microtak-admin-web/compare/v0.7.0...v0.8.0) (2026-11-02)
 
 
