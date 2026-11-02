@@ -509,6 +509,11 @@ async fn e2e_overview_page_shows_real_server_metrics() {
         !body.contains("unreachable right now"),
         "metrics endpoint should have been reachable"
     );
+    // The Overview auto-reloads so the live figures stay current while open.
+    assert!(
+        body.contains("location.reload()") && body.contains("20000"),
+        "Overview should reload itself every 20s"
+    );
 
     // The System page still carries the host's own resource usage.
     let (status, body) = get(&router, "/system").await;

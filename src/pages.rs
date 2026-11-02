@@ -536,6 +536,10 @@ fn render_overview(
     server: Option<&Result<crate::server_metrics::ServerMetrics, reqwest::Error>>,
 ) -> Markup {
     html! {
+        // Keep the live figures current while someone is watching this page:
+        // reload every 20s. The page is server-rendered, so a full reload is
+        // the refresh (same "reload to refresh" the panel mentions).
+        script { (maud::PreEscaped("setTimeout(function(){location.reload();}, 20000);")) }
         @match server {
             // Without the metrics endpoint there is nothing to show here --
             // point the operator at the knob that turns it on.
