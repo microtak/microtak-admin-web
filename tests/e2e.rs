@@ -95,6 +95,7 @@ async fn setup_full() -> (axum::Router, Server, std::path::PathBuf) {
         marti_api_addr: "127.0.0.1:0".parse().unwrap(),
         plain_tcp_addr: "127.0.0.1:0".parse().unwrap(),
         mtls_addr: "127.0.0.1:0".parse().unwrap(),
+        metrics_addr: Some("127.0.0.1:0".parse().unwrap()),
         data_dir: unique_temp_dir("data"),
         admin_common_name: Some("web-admin".to_string()),
         ..AppConfig::default()
@@ -102,6 +103,7 @@ async fn setup_full() -> (axum::Router, Server, std::path::PathBuf) {
     let app = App::bind(config).await.unwrap();
     let enrollment_addr = app.enrollment_addr().unwrap();
     let marti_api_addr = app.marti_api_addr().unwrap();
+    let metrics_addr = app.metrics_addr().expect("metrics listener was enabled");
     let ca_cert_pem = app.ca_cert_pem.clone();
     let missions = app.missions.clone();
     let registry = app.registry.clone();
@@ -138,6 +140,7 @@ async fn setup_full() -> (axum::Router, Server, std::path::PathBuf) {
         enrollment_url: Some("https://192.168.1.10:8446".to_string()),
         streaming_port: 8089,
         api_port: 8443,
+        metrics_url: Some(format!("http://{metrics_addr}")),
     };
     let router = pages::router(state);
 
@@ -476,4 +479,31 @@ async fn e2e_web_ui_revokes_certificates_and_blocks_identities() {
     let (status, _) = post_form(&router, "/devices/field-phone/unblock", "").await;
     assert!(status.is_success() || status.is_redirection(), "{status}");
     assert!(!app.registry.is_revoked("field-phone"));
+}
+
+#[tokio::test]
+async fn e2e_system_page_shows_real_server_metrics() {
+    // The System page scrapes the *real* running server's metrics endpoint
+    // (wired up in setup_full) and renders the "MicroTAK server" panel with
+    // the server process's own figures -- not a mock, the actual exposition.
+    let (router, _server, creds_dir) = setup_full().await;
+
+    let (status, body) = get(&router, "/system").await;
+    assert_eq!(status, StatusCode::OK);
+    // Host section is always there; the server panel appears only because a
+    // reachable metrics endpoint is configured.
+    assert!(body.contains("MicroTAK server"), "server panel missing");
+    assert!(
+        body.contains("Server memory (RSS)"),
+        "server RSS card missing"
+    );
+    assert!(body.contains("Server CPU"), "server CPU card missing");
+    // Live operational figures from the real server (one admin enrolled).
+    assert!(body.contains("Enrolled devices"), "figures grid missing");
+    assert!(
+        !body.contains("unreachable right now"),
+        "metrics endpoint should have been reachable"
+    );
+
+    let _ = std::fs::remove_dir_all(&creds_dir);
 }

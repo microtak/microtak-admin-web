@@ -30,6 +30,11 @@ pub struct Config {
     /// included in the QR code when not the TAK defaults (8089/8443).
     pub streaming_port: u16,
     pub api_port: u16,
+    /// Optional: base URL of the microtak-server's Prometheus metrics
+    /// endpoint (plain HTTP, private -- e.g. `http://127.0.0.1:9090`). Set
+    /// it to show the server process's own CPU/RAM and live counters on the
+    /// System page; unset hides that panel.
+    pub metrics_url: Option<String>,
 }
 
 impl Config {
@@ -54,6 +59,7 @@ impl Config {
                 crate::qr::DEFAULT_STREAMING_PORT,
             ),
             api_port: port_env("MICROTAK_ADMIN_WEB_API_PORT", crate::qr::DEFAULT_API_PORT),
+            metrics_url: std::env::var("MICROTAK_ADMIN_WEB_METRICS_URL").ok(),
         }
     }
 }

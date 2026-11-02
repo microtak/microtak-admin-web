@@ -26,6 +26,9 @@ pub struct AppState {
     /// The streaming (mTLS CoT) and Marti API ports devices connect to.
     pub streaming_port: u16,
     pub api_port: u16,
+    /// Base URL of the server's private Prometheus endpoint, if enabled --
+    /// drives the "MicroTAK server" panel on the System page.
+    pub metrics_url: Option<String>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -514,16 +517,26 @@ async fn unblock_device_page(State(state): State<AppState>, Path(name): Path<Str
 // System resource usage (this host)
 // ---------------------------------------------------------------------
 
-async fn system_page() -> Response {
+async fn system_page(State(state): State<AppState>) -> Response {
     let stats = crate::system::SystemStats::gather();
-    Html(layout("System", render_system(&stats)).into_string()).into_response()
+    // The server's own metrics, if its (private) metrics endpoint is wired
+    // up. A fetch failure is surfaced in the page, not treated as fatal.
+    let server = match &state.metrics_url {
+        Some(url) => Some(crate::server_metrics::fetch(url).await),
+        None => None,
+    };
+    Html(layout("System", render_system(&stats, server.as_ref())).into_string()).into_response()
 }
 
-fn render_system(stats: &crate::system::SystemStats) -> Markup {
+fn render_system(
+    stats: &crate::system::SystemStats,
+    server: Option<&Result<crate::server_metrics::ServerMetrics, reqwest::Error>>,
+) -> Markup {
     use crate::system::human_bytes;
     let cores = if stats.ncpu == 1 { "core" } else { "cores" };
     html! {
-        p { "Resource usage of the field-HQ host (this tablet) — reload to refresh." }
+        h2 class="mt-6 mb-2 text-lg font-semibold text-slate-800 dark:text-slate-100" { "Host" }
+        p class="text-sm text-slate-500 dark:text-slate-400" { "Resource usage of the field-HQ host (this tablet) — reload to refresh." }
         (stat_card(
             "CPU load",
             &format!("{:.2} · {:.2} · {:.2}  (1·5·15 min, {} {cores})",
@@ -542,6 +555,94 @@ fn render_system(stats: &crate::system::SystemStats) -> Markup {
             &format!("{} / {} used", human_bytes(stats.disk_used()), human_bytes(stats.disk_total)),
             stats.disk_percent(),
         ))
+        @if let Some(result) = server {
+            (render_server_panel(stats, result))
+        }
+    }
+}
+
+/// The "MicroTAK server" panel: the server *process's* own CPU/RAM (not the
+/// host's) plus its live operational counters, scraped from its metrics
+/// endpoint. Only rendered when that endpoint is configured.
+fn render_server_panel(
+    stats: &crate::system::SystemStats,
+    result: &Result<crate::server_metrics::ServerMetrics, reqwest::Error>,
+) -> Markup {
+    use crate::system::human_bytes;
+    let version = match result {
+        Ok(m) => m.version.clone(),
+        Err(_) => None,
+    };
+    html! {
+        h2 class="mt-8 mb-2 text-lg font-semibold text-slate-800 dark:text-slate-100" {
+            "MicroTAK server"
+            @if let Some(v) = &version {
+                span class="ml-2 text-sm font-normal text-slate-400 dark:text-slate-500" { "v" (v) }
+            }
+        }
+        @match result {
+            Err(_) => {
+                p class="my-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300" {
+                    "Server metrics endpoint is configured but unreachable right now."
+                }
+            }
+            Ok(m) => {
+                // CPU: cores busy now as a fraction of all cores, matching the
+                // host card's 0-100 scale. Falls back to the cumulative counter.
+                @let cpu_detail = match m.cpu_cores_used {
+                    Some(cores) => format!("{cores:.2} cores busy · {:.0}s CPU time total", m.cpu_seconds),
+                    None => format!("{:.0}s CPU time total (live sample unavailable)", m.cpu_seconds),
+                };
+                @let cpu_percent = match m.cpu_cores_used {
+                    Some(cores) if stats.ncpu > 0 => (cores / stats.ncpu as f64 * 100.0).clamp(0.0, 100.0),
+                    _ => 0.0,
+                };
+                (stat_card("Server CPU", &cpu_detail, cpu_percent))
+                // RAM: the server's resident set as a share of host memory.
+                @let host_bytes = stats.mem_total_kb.saturating_mul(1024);
+                @let rss_percent = if host_bytes > 0 { (m.resident_bytes / host_bytes as f64 * 100.0).clamp(0.0, 100.0) } else { 0.0 };
+                (stat_card(
+                    "Server memory (RSS)",
+                    &format!("{} of {} host RAM", human_bytes(m.resident_bytes as u64), human_bytes(host_bytes)),
+                    rss_percent,
+                ))
+                (server_figures(m))
+            }
+        }
+    }
+}
+
+/// A compact grid of the server's live operational figures (not usage bars).
+fn server_figures(m: &crate::server_metrics::ServerMetrics) -> Markup {
+    use crate::system::human_bytes;
+    let figures: [(&str, String); 6] = [
+        (
+            "Connected clients",
+            format!(
+                "{} ({} TLS · {} TCP)",
+                m.connected_total(),
+                m.connected_tls,
+                m.connected_tcp
+            ),
+        ),
+        ("Open connections", m.open_connections.to_string()),
+        ("Enrolled devices", m.devices.to_string()),
+        (
+            "Missions · groups",
+            format!("{} · {}", m.missions, m.groups),
+        ),
+        ("CoT events relayed", m.cot_events_total().to_string()),
+        ("Data stored", human_bytes(m.data_dir_bytes)),
+    ];
+    html! {
+        div class="my-4 grid grid-cols-2 gap-3 sm:grid-cols-3" {
+            @for (label, value) in &figures {
+                div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-800" {
+                    div class="text-xs uppercase tracking-wide text-slate-400 dark:text-slate-500" { (label) }
+                    div class="mt-1 text-lg font-semibold tabular-nums text-slate-800 dark:text-slate-100" { (value) }
+                }
+            }
+        }
     }
 }
 

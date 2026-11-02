@@ -31,6 +31,7 @@ async fn main() {
         enrollment_url: config.enrollment_url,
         streaming_port: config.streaming_port,
         api_port: config.api_port,
+        metrics_url: config.metrics_url,
     };
 
     let password = Arc::new(config.web_password);
