@@ -40,12 +40,16 @@ pub fn router(state: AppState) -> Router {
             "/groups/:name/members/:identity/remove",
             post(remove_member_page),
         )
-        .route("/missions", get(list_missions_page))
+        .route(
+            "/missions",
+            get(list_missions_page).post(create_mission_page),
+        )
         .route(
             "/missions/:name",
             get(mission_detail_page).post(assign_role_page),
         )
         .route("/missions/:name/roles/:uid/revoke", post(revoke_role_page))
+        .route("/system", get(system_page))
         .route("/devices", get(list_devices_page))
         .route(
             "/devices/certificates/:hash/revoke",
@@ -65,24 +69,30 @@ fn layout(title: &str, body: Markup) -> Markup {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { "MicroTAK — " (title) }
+                // Set the theme before first paint (no flash): a saved choice
+                // wins, else dark between 18:00 and 07:00 local. Defines the
+                // toggle used by the header button. Pure inline JS, no framework.
+                script { (maud::PreEscaped(THEME_JS)) }
                 style { (maud::PreEscaped(CSS)) }
             }
-            body class="min-h-screen bg-slate-100 font-sans text-slate-800 antialiased" {
-                header class="bg-slate-900 text-slate-100 shadow-md" {
+            body class="min-h-screen bg-slate-100 font-sans text-slate-800 antialiased dark:bg-slate-900 dark:text-slate-200" {
+                header class="bg-slate-900 text-slate-100 shadow-md dark:bg-slate-950" {
                     div class="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3" {
                         span class="h-2.5 w-2.5 rounded-full bg-emerald-400" {}
                         span class="text-lg font-semibold tracking-tight" { "MicroTAK" }
                         span class="hidden text-sm text-slate-400 sm:inline" { "admin" }
-                        nav class="ml-auto flex flex-wrap gap-1" {
+                        nav class="ml-auto flex flex-wrap items-center gap-1" {
                             a class="nav-link" href="/tokens" { "Tokens" }
                             a class="nav-link" href="/missions" { "Missions" }
                             a class="nav-link" href="/groups" { "Groups" }
                             a class="nav-link" href="/devices" { "Devices" }
+                            a class="nav-link" href="/system" { "System" }
+                            button type="button" class="theme-toggle" onclick="mtToggleTheme()" title="Toggle light / dark" aria-label="Toggle light or dark theme" { "◐" }
                         }
                     }
                 }
                 main class="mx-auto max-w-5xl px-4 py-8" {
-                    h1 class="mb-6 text-2xl font-bold tracking-tight text-slate-900" { (title) }
+                    h1 class="mb-6 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100" { (title) }
                     (body)
                 }
             }
@@ -96,6 +106,23 @@ fn layout(title: &str, body: Markup) -> Markup {
 // (standalone CLI or `npx tailwindcss`). The output is committed; the runtime
 // still has no build step.
 const CSS: &str = include_str!("../assets/app.css");
+
+// Minimal theme bootstrap: apply before first paint, default by time of day,
+// remember an explicit choice. `mtToggleTheme` is wired to the header button.
+const THEME_JS: &str = r#"(function(){
+  function apply(t){document.documentElement.classList.toggle('dark',t==='dark');}
+  function pick(){
+    var s=null;try{s=localStorage.getItem('mt-theme');}catch(e){}
+    if(s==='dark'||s==='light')return s;
+    var h=new Date().getHours();return (h>=18||h<7)?'dark':'light';
+  }
+  apply(pick());
+  window.mtToggleTheme=function(){
+    var next=document.documentElement.classList.contains('dark')?'light':'dark';
+    try{localStorage.setItem('mt-theme',next);}catch(e){}
+    apply(next);
+  };
+})();"#;
 
 fn error_banner(message: &str) -> Markup {
     html! { div class="error" { (message) } }
@@ -212,6 +239,27 @@ fn short(token: &str) -> String {
     }
 }
 
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// A compact "time since" label, e.g. `just now`, `5m ago`, `3h ago`, `2d ago`.
+fn ago(now: i64, then: i64) -> String {
+    let secs = (now - then).max(0);
+    if secs < 60 {
+        "just now".to_string()
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
+}
+
 #[derive(Deserialize)]
 struct MintTokenForm {
     #[serde(default, deserialize_with = "empty_string_as_none_str")]
@@ -323,18 +371,63 @@ async fn revoke_token_page(State(state): State<AppState>, Path(token): Path<Stri
 // ---------------------------------------------------------------------
 
 async fn list_devices_page(State(state): State<AppState>) -> Response {
-    match state.client.list_certificates().await {
-        Ok(certs) => {
-            Html(layout("Devices", render_certificates(&certs)).into_string()).into_response()
-        }
-        Err(error) => error_response(&error),
+    let certs = match state.client.list_certificates().await {
+        Ok(certs) => certs,
+        Err(error) => return error_response(&error),
+    };
+    // Connection status + last-seen comes from clientEndPoints (server 0.17.0+
+    // keeps offline identities too). A convenience: if it can't be fetched we
+    // still render the certificate list without the live column.
+    let endpoints = state
+        .client
+        .list_client_endpoints()
+        .await
+        .unwrap_or_default();
+    Html(layout("Devices", render_certificates(&certs, &endpoints)).into_string()).into_response()
+}
+
+/// The connection state of a device, matched from clientEndPoints by cert CN
+/// or bound client uid.
+enum Presence {
+    Online,
+    /// Offline, with the last-seen epoch seconds if the server reported one.
+    Offline(Option<i64>),
+    /// No clientEndPoints record at all (never connected, or old server).
+    Unknown,
+}
+
+fn presence_of(
+    cert: &crate::client::TakCert,
+    endpoints: &[crate::client::ClientEndpoint],
+) -> Presence {
+    let matches = |e: &crate::client::ClientEndpoint| {
+        e.common_name.as_deref() == Some(cert.user_dn.as_str())
+            || (!cert.client_uid.is_empty() && e.uid.as_deref() == Some(cert.client_uid.as_str()))
+    };
+    if endpoints.iter().any(|e| matches(e) && e.is_connected()) {
+        return Presence::Online;
+    }
+    match endpoints
+        .iter()
+        .filter(|e| matches(e))
+        .map(|e| e.last_seen_unix)
+        .max()
+    {
+        Some(ts) if ts > 0 => Presence::Offline(Some(ts)),
+        Some(_) => Presence::Offline(None),
+        None => Presence::Unknown,
     }
 }
 
-fn render_certificates(certs: &[crate::client::TakCert]) -> Markup {
+fn render_certificates(
+    certs: &[crate::client::TakCert],
+    endpoints: &[crate::client::ClientEndpoint],
+) -> Markup {
+    let now = now_unix();
     html! {
         p {
             "Every issued certificate (the official TAK Server certificate admin API). "
+            "A device name shows " span class="text-emerald-600 dark:text-emerald-400 font-semibold" { "green" } " while it is connected. "
             strong { "Revoke" } " a lost or compromised device's certificate: it stops working immediately, live "
             "connection included; the owner can enroll a new device with their password account. "
             strong { "Block" } " (MicroTAK extension) locks an identity out entirely -- any certificate, no "
@@ -344,14 +437,28 @@ fn render_certificates(certs: &[crate::client::TakCert]) -> Markup {
             p { "No issued certificates." }
         } @else {
             table {
-                tr { th{"ID"} th{"User"} th{"Status"} th{"Client UID"} th{"Issued"} th{"Expires"} th{"Certificate"} th{} }
+                tr { th{"ID"} th{"User"} th{"Status"} th{"Last seen"} th{"Client UID"} th{"Issued"} th{"Expires"} th{"Certificate"} th{} }
                 @for cert in certs {
                     @let user = urlencode(&cert.user_dn);
+                    @let presence = presence_of(cert, endpoints);
                     tr {
                         td { (cert.id) }
-                        td { (cert.user_dn) }
+                        td {
+                            @match presence {
+                                Presence::Online => span class="text-emerald-600 dark:text-emerald-400 font-semibold" { (cert.user_dn) },
+                                _ => span { (cert.user_dn) },
+                            }
+                        }
                         td class=(if cert.revocation_date.is_some() { "revoked" } else { "" }) {
                             (if cert.revocation_date.is_some() { "revoked" } else { "valid" })
+                        }
+                        td {
+                            @match presence {
+                                Presence::Online => span class="text-emerald-600 dark:text-emerald-400 font-semibold" { "online" },
+                                Presence::Offline(Some(ts)) => span { (ago(now, ts)) },
+                                Presence::Offline(None) => span { "offline" },
+                                Presence::Unknown => span { "—" },
+                            }
                         }
                         td { (if cert.client_uid.is_empty() { "—" } else { cert.client_uid.as_str() }) }
                         td { (cert.issuance_date.as_deref().unwrap_or("—")) }
@@ -400,6 +507,65 @@ async fn unblock_device_page(State(state): State<AppState>, Path(name): Path<Str
     match state.client.set_device_blocked(&name, false).await {
         Ok(()) => Redirect::to("/devices").into_response(),
         Err(error) => error_response(&error),
+    }
+}
+
+// ---------------------------------------------------------------------
+// System resource usage (this host)
+// ---------------------------------------------------------------------
+
+async fn system_page() -> Response {
+    let stats = crate::system::SystemStats::gather();
+    Html(layout("System", render_system(&stats)).into_string()).into_response()
+}
+
+fn render_system(stats: &crate::system::SystemStats) -> Markup {
+    use crate::system::human_bytes;
+    let cores = if stats.ncpu == 1 { "core" } else { "cores" };
+    html! {
+        p { "Resource usage of the field-HQ host (this tablet) — reload to refresh." }
+        (stat_card(
+            "CPU load",
+            &format!("{:.2} · {:.2} · {:.2}  (1·5·15 min, {} {cores})",
+                stats.load1, stats.load5, stats.load15, stats.ncpu),
+            stats.cpu_percent(),
+        ))
+        (stat_card(
+            "Memory",
+            &format!("{} / {} used",
+                human_bytes(stats.mem_used_kb().saturating_mul(1024)),
+                human_bytes(stats.mem_total_kb.saturating_mul(1024))),
+            stats.mem_percent(),
+        ))
+        (stat_card(
+            "Disk (/)",
+            &format!("{} / {} used", human_bytes(stats.disk_used()), human_bytes(stats.disk_total)),
+            stats.disk_percent(),
+        ))
+    }
+}
+
+/// A labelled usage card with a coloured progress bar (green < 70 %, amber
+/// < 90 %, red above).
+fn stat_card(title: &str, detail: &str, percent: f64) -> Markup {
+    let bar = if percent >= 90.0 {
+        "bg-rose-500"
+    } else if percent >= 70.0 {
+        "bg-amber-500"
+    } else {
+        "bg-emerald-500"
+    };
+    html! {
+        div class="my-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800" {
+            div class="flex items-baseline justify-between" {
+                span class="font-semibold text-slate-800 dark:text-slate-100" { (title) }
+                span class="text-sm tabular-nums text-slate-500 dark:text-slate-400" { (format!("{percent:.0}%")) }
+            }
+            div class="mt-1 text-sm text-slate-500 dark:text-slate-400" { (detail) }
+            div class="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" {
+                div class=(format!("h-full rounded-full {bar}")) style=(format!("width:{percent:.1}%")) {}
+            }
+        }
     }
 }
 
@@ -533,24 +699,107 @@ async fn remove_member_page(
 // ---------------------------------------------------------------------
 
 async fn list_missions_page(State(state): State<AppState>) -> Response {
-    match state.client.list_missions().await {
-        Ok(missions) => {
-            let body = html! {
-                table {
-                    tr { th{"Name"} th{"Creator"} th{"Groups"} th{"Default role"} th{} }
-                    @for mission in &missions {
-                        tr {
-                            td { (mission.name) }
-                            td { (mission.creator_uid) }
-                            td { (mission.groups.join(", ")) }
-                            td { (mission.default_role.as_ref().map(|r| r.role.as_str()).unwrap_or("-")) }
-                            td { a href=(format!("/missions/{}", urlencode(&mission.name))) { "Manage" } }
-                        }
+    let missions = match state.client.list_missions().await {
+        Ok(missions) => missions,
+        Err(error) => return error_response(&error),
+    };
+    // Group picker is a convenience; render the form even if groups can't be
+    // fetched (the field accepts typed names too).
+    let groups = state.client.list_groups().await.unwrap_or_default();
+    let body = html! {
+        fieldset {
+            legend { "Create a mission" }
+            form method="post" action="/missions" {
+                label { "Name: " input type="text" name="name" placeholder="e.g. recon-east" required; }
+                br;
+                label { "Description (optional): " input type="text" name="description"; }
+                br;
+                // A mission is visible only within its groups; share the
+                // server's existing groups as a dropdown (comma-separated;
+                // empty means __ANON__, visible to everyone).
+                datalist id="known-groups" {
+                    @for group in &groups {
+                        option value=(group.name);
                     }
                 }
-            };
-            Html(layout("Missions", body).into_string()).into_response()
+                label { "Groups (optional, comma-separated): " input type="text" name="groups" list="known-groups" placeholder="Red, Blue — empty = __ANON__"; }
+                br;
+                label { "Creator UID: " input type="text" name="creator_uid" value="admin"; }
+                br;
+                label {
+                    "Default role for new subscribers: "
+                    select name="default_role" {
+                        option value="MISSION_SUBSCRIBER" { "subscriber" }
+                        option value="MISSION_OWNER" { "owner" }
+                        option value="MISSION_READONLY_SUBSCRIBER" { "read-only subscriber" }
+                    }
+                }
+                small { " — needed to manage roles later" }
+                br;
+                button type="submit" { "Create mission" }
+            }
         }
+        @if missions.is_empty() {
+            p { "No missions yet." }
+        } @else {
+            table {
+                tr { th{"Name"} th{"Creator"} th{"Groups"} th{"Default role"} th{} }
+                @for mission in &missions {
+                    tr {
+                        td { (mission.name) }
+                        td { (mission.creator_uid) }
+                        td { (mission.groups.join(", ")) }
+                        td { (mission.default_role.as_ref().map(|r| r.role.as_str()).unwrap_or("-")) }
+                        td { a href=(format!("/missions/{}", urlencode(&mission.name))) { "Manage" } }
+                    }
+                }
+            }
+        }
+    };
+    Html(layout("Missions", body).into_string()).into_response()
+}
+
+#[derive(Deserialize)]
+struct CreateMissionForm {
+    name: String,
+    #[serde(default, deserialize_with = "empty_string_as_none_str")]
+    description: Option<String>,
+    #[serde(default)]
+    groups: String,
+    #[serde(default)]
+    creator_uid: String,
+    #[serde(default)]
+    default_role: String,
+}
+
+async fn create_mission_page(
+    State(state): State<AppState>,
+    Form(form): Form<CreateMissionForm>,
+) -> Response {
+    let name = form.name.trim();
+    if name.is_empty() {
+        return error_page("A mission needs a name.");
+    }
+    let creator_uid = match form.creator_uid.trim() {
+        "" => "admin",
+        other => other,
+    };
+    let default_role = match form.default_role.trim() {
+        "" => None,
+        role => Some(role),
+    };
+    match state
+        .client
+        .create_mission(
+            name,
+            creator_uid,
+            form.description.as_deref(),
+            &name_list(&form.groups),
+            default_role,
+        )
+        .await
+    {
+        Ok(()) => Redirect::to(&format!("/missions/{}", urlencode(name))).into_response(),
         Err(error) => error_response(&error),
     }
 }

@@ -107,6 +107,30 @@ pub fn describe_grants(grants: &[GroupGrant]) -> String {
         .join(", ")
 }
 
+/// One row of `GET /Marti/api/clientEndPoints`: a currently-connected client,
+/// or a previously-seen identity now offline (server 0.17.0+ keeps the latter
+/// with `last_status` / `last_seen_unix`). Extra fields are ignored.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClientEndpoint {
+    #[serde(default)]
+    pub common_name: Option<String>,
+    #[serde(default)]
+    pub uid: Option<String>,
+    /// `"connected"` or `"disconnected"` (absent on servers older than 0.17.0).
+    #[serde(default)]
+    pub last_status: Option<String>,
+    /// Epoch seconds of the last connect/disconnect (0 if unknown).
+    #[serde(default)]
+    pub last_seen_unix: i64,
+}
+
+impl ClientEndpoint {
+    pub fn is_connected(&self) -> bool {
+        // Older servers return only live clients with no status field.
+        self.last_status.as_deref() != Some("disconnected")
+    }
+}
+
 /// Groups to put an enrolling device into -- the official user-file lists.
 #[derive(Serialize, Default, Debug, PartialEq)]
 pub struct GroupLists {
@@ -340,6 +364,38 @@ impl MicrotakClient {
         Ok(())
     }
 
+    /// The official `PUT /missions/{name}`: create a mission. `groups` are the
+    /// groups it is visible in (repeatable `group=` params; the server
+    /// defaults to `__ANON__` when none is given). A `default_role` is what
+    /// new subscribers get -- it must be set for roles to be manageable later.
+    pub async fn create_mission(
+        &self,
+        name: &str,
+        creator_uid: &str,
+        description: Option<&str>,
+        groups: &[String],
+        default_role: Option<&str>,
+    ) -> Result<(), ClientError> {
+        let mut url = format!(
+            "{}/Marti/api/missions/{}?creatorUid={}",
+            self.base_url,
+            urlencoding_light(name),
+            urlencoding_light(creator_uid)
+        );
+        if let Some(description) = description.filter(|d| !d.is_empty()) {
+            url.push_str(&format!("&description={}", urlencoding_light(description)));
+        }
+        if let Some(role) = default_role {
+            url.push_str(&format!("&defaultRole={}", urlencoding_light(role)));
+        }
+        for group in groups {
+            url.push_str(&format!("&group={}", urlencoding_light(group)));
+        }
+        let response = self.http.put(url).send().await?;
+        check_status(response).await?;
+        Ok(())
+    }
+
     pub async fn list_groups(&self) -> Result<Vec<GroupInfo>, ClientError> {
         let response = self
             .http
@@ -374,6 +430,18 @@ impl MicrotakClient {
             .await?;
         let body: ApiEnvelope<Vec<TakCert>> = check_status(response).await?.json().await?;
         Ok(body.data)
+    }
+
+    /// Who is connected right now (`GET /Marti/api/clientEndPoints`). Returns a
+    /// bare JSON array (not enveloped); the server reflects live connections
+    /// only, so this is "currently connected", not a historical last-seen.
+    pub async fn list_client_endpoints(&self) -> Result<Vec<ClientEndpoint>, ClientError> {
+        let response = self
+            .http
+            .get(format!("{}/Marti/api/clientEndPoints", self.base_url))
+            .send()
+            .await?;
+        Ok(check_status(response).await?.json().await?)
     }
 
     /// Revoke one certificate by hash (official `DELETE /certadmin/cert/{hash}`).

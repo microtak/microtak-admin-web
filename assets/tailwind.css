@@ -4,31 +4,45 @@
 
 /* Bare-element styling: the maud pages emit semantic HTML (tables, forms,
    fieldsets, buttons) without utility classes, so style the elements here and
-   every page inherits a consistent look. App-shell chrome uses utilities in
-   the markup (see layout()). */
+   every page inherits a consistent look, light and dark. App-shell chrome and
+   the system cards use utilities in the markup (see layout()/stat_card). */
 @layer base {
   main a:not(.btn) {
-    @apply font-medium text-indigo-600 underline-offset-2 hover:text-indigo-800 hover:underline;
+    @apply font-medium text-indigo-600 underline-offset-2 hover:text-indigo-800 hover:underline
+           dark:text-indigo-400 dark:hover:text-indigo-300;
   }
-  main p { @apply my-3 leading-relaxed text-slate-600; }
-  h2 { @apply mt-8 mb-2 text-lg font-semibold text-slate-900; }
-  code { @apply rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.85em] text-slate-700 ring-1 ring-slate-200; }
+  main p { @apply my-3 leading-relaxed text-slate-600 dark:text-slate-300; }
+  h2 { @apply mt-8 mb-2 text-lg font-semibold text-slate-900 dark:text-slate-100; }
+  code {
+    @apply rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.85em] text-slate-700 ring-1 ring-slate-200
+           dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700;
+  }
 
-  table { @apply my-4 w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-sm shadow-sm; }
-  thead tr, tr:first-child { @apply bg-slate-50; }
-  th { @apply border-b border-slate-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500; }
-  td { @apply border-b border-slate-100 px-3 py-2 align-middle text-slate-700; }
+  table {
+    @apply my-4 w-full overflow-hidden rounded-xl border border-slate-200 bg-white text-sm shadow-sm
+           dark:border-slate-700 dark:bg-slate-800;
+  }
+  thead tr, tr:first-child { @apply bg-slate-50 dark:bg-slate-900/40; }
+  th {
+    @apply border-b border-slate-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500
+           dark:border-slate-700 dark:text-slate-400;
+  }
+  td { @apply border-b border-slate-100 px-3 py-2 align-middle text-slate-700 dark:border-slate-700/60 dark:text-slate-200; }
   tr:last-child td { @apply border-b-0; }
 
-  fieldset { @apply my-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm; }
-  legend { @apply px-2 text-sm font-semibold text-slate-700; }
-  label { @apply inline-block py-1 text-sm text-slate-700; }
+  fieldset {
+    @apply my-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm
+           dark:border-slate-700 dark:bg-slate-800;
+  }
+  legend { @apply px-2 text-sm font-semibold text-slate-700 dark:text-slate-200; }
+  label { @apply inline-block py-1 text-sm text-slate-700 dark:text-slate-300; }
   input[type="text"], input[type="number"], select {
     @apply mt-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 shadow-sm
-           focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500;
+           focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500
+           dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100;
   }
-  small { @apply text-slate-500; }
-  hr { @apply my-4 border-slate-200; }
+  small { @apply text-slate-500 dark:text-slate-400; }
+  hr { @apply my-4 border-slate-200 dark:border-slate-700; }
 }
 
 @layer components {
@@ -40,16 +54,25 @@
   button {
     @apply inline-flex items-center justify-center rounded-lg bg-indigo-600 px-3 py-1.5
            text-sm font-medium text-white shadow-sm transition-colors
-           hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1;
+           hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1
+           dark:focus:ring-offset-slate-900;
   }
   button.danger {
     @apply bg-white text-rose-600 ring-1 ring-inset ring-rose-300
-           hover:bg-rose-50 hover:text-rose-700 focus:ring-rose-500;
+           hover:bg-rose-50 hover:text-rose-700 focus:ring-rose-500
+           dark:bg-slate-800 dark:text-rose-400 dark:ring-rose-500/50 dark:hover:bg-slate-700;
+  }
+  /* Header theme toggle: subtle, sits in the dark app bar. */
+  .theme-toggle {
+    @apply ml-1 inline-flex items-center justify-center rounded-lg bg-transparent px-2.5 py-1.5
+           text-base leading-none text-slate-300 shadow-none ring-1 ring-inset ring-slate-700
+           hover:bg-slate-700 hover:text-white focus:ring-slate-500;
   }
   .error {
-    @apply my-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800;
+    @apply my-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800
+           dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-200;
   }
   /* Status cells (token used/revoked, cert revoked) read as muted labels. */
-  .revoked, .used { @apply font-medium text-slate-400; }
+  .revoked, .used { @apply font-medium text-slate-400 dark:text-slate-500; }
   form.inline { display: inline; }
 }

@@ -10,3 +10,4 @@ pub mod config;
 pub mod csrf;
 pub mod pages;
 pub mod qr;
+pub mod system;

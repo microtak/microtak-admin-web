@@ -5,6 +5,7 @@
 // -- no CDN, no runtime build, works offline on the field tablet.
 module.exports = {
   content: ["./src/**/*.rs"],
+  darkMode: "class",
   theme: {
     extend: {
       fontFamily: {
