@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/microtak/microtak-admin-web/compare/v0.12.0...v0.13.0) (2026-11-02)
+
+
+### Features
+
+* **nix:** flake with package and NixOS module ([#19](https://github.com/microtak/microtak-admin-web/issues/19)) ([25357ce](https://github.com/microtak/microtak-admin-web/commit/25357ce978e7802eb678b3a88e77951ea6611a50))
+
 ## [0.12.0](https://github.com/microtak/microtak-admin-web/compare/v0.11.0...v0.12.0) (2026-11-02)
 
 
